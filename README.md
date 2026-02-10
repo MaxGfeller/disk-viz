@@ -2,6 +2,8 @@
 
 An interactive, web-based disk space visualization tool. Scan any directory and explore its contents as a treemap, drill down into subdirectories, and delete files directly from the interface.
 
+![Screenshot](screenshot.png)
+
 ## Features
 
 - **Streaming scan** — filesystem is indexed progressively with real-time progress updates via Server-Sent Events
