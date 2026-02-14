@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import type { TreeNode } from "../lib/types";
 
 interface ScanState {
@@ -18,68 +18,73 @@ export function useScan() {
     scanProgress: null,
   });
 
-  const scan = useCallback(async (path: string) => {
-    setState({ data: null, loading: true, scanning: true, error: null, scanProgress: null });
-    try {
-      const res = await fetch(`/api/scan?path=${encodeURIComponent(path)}`);
-      if (!res.ok) {
-        // Validation errors come back as plain JSON
-        const body = await res.json().catch(() => ({ error: res.statusText }));
-        throw new Error(body.error || `HTTP ${res.status}`);
-      }
+  const cleanupRef = useRef<(() => void) | null>(null);
 
-      // Successful response is an SSE stream
-      const reader = res.body!.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
+  const setupListeners = useCallback(() => {
+    // Clean up previous listeners
+    cleanupRef.current?.();
 
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
-        const parts = buffer.split("\n\n");
-        buffer = parts.pop()!; // keep incomplete chunk
-
-        for (const part of parts) {
-          const dataLine = part
-            .split("\n")
-            .find((l) => l.startsWith("data: "));
-          if (!dataLine) continue;
-          const msg = JSON.parse(dataLine.slice(6));
-
-          if (msg.type === "progress") {
-            setState((prev) => ({
-              ...prev,
-              data: msg.tree,
-              loading: false,
-              scanProgress: msg.progress ?? prev.scanProgress,
-            }));
-          } else if (msg.type === "done") {
-            setState({
-              data: msg.tree,
-              loading: false,
-              scanning: false,
-              error: null,
-              scanProgress: null,
-            });
-          } else if (msg.type === "error") {
-            throw new Error(msg.error);
-          }
-        }
-      }
-
-      // In case stream closed without a done message
-      setState((prev) => ({ ...prev, loading: false, scanning: false }));
-    } catch (err: any) {
+    const removeProgress = window.api.onScanProgress(({ tree, progress }) => {
       setState((prev) => ({
-        data: prev.data, // keep any partial data
+        ...prev,
+        data: tree,
+        loading: false,
+        scanProgress: progress ?? prev.scanProgress,
+      }));
+    });
+
+    const removeDone = window.api.onScanDone(({ tree }) => {
+      setState({
+        data: tree,
         loading: false,
         scanning: false,
-        error: err.message,
+        error: null,
+        scanProgress: null,
+      });
+    });
+
+    const removeError = window.api.onScanError(({ error }) => {
+      setState((prev) => ({
+        data: prev.data,
+        loading: false,
+        scanning: false,
+        error,
+        scanProgress: null,
+      }));
+    });
+
+    cleanupRef.current = () => {
+      removeProgress();
+      removeDone();
+      removeError();
+    };
+  }, []);
+
+  // Clean up listeners on unmount
+  useEffect(() => {
+    return () => {
+      cleanupRef.current?.();
+      window.api.removeAllListeners();
+    };
+  }, []);
+
+  const scan = useCallback(async (path: string) => {
+    setState({ data: null, loading: true, scanning: true, error: null, scanProgress: null });
+
+    // Set up fresh listeners for this scan
+    setupListeners();
+
+    const result = await window.api.startScan(path);
+    if (result.error) {
+      setState((prev) => ({
+        data: prev.data,
+        loading: false,
+        scanning: false,
+        error: result.error!,
+        scanProgress: null,
       }));
     }
-  }, []);
+  }, [setupListeners]);
 
   const setData = useCallback((data: TreeNode | null) => {
     setState((prev) => ({ ...prev, data }));

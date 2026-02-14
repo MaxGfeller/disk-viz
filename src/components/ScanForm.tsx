@@ -14,6 +14,13 @@ export function ScanForm({ onScan, loading }: Props) {
     if (trimmed) onScan(trimmed);
   };
 
+  const handleBrowse = async () => {
+    const result = await window.api.selectDirectory();
+    if (result.path) {
+      setPath(result.path);
+    }
+  };
+
   return (
     <form className="scan-form" onSubmit={handleSubmit}>
       <input
@@ -23,6 +30,9 @@ export function ScanForm({ onScan, loading }: Props) {
         placeholder="Enter absolute path..."
         disabled={loading}
       />
+      <button type="button" onClick={handleBrowse} disabled={loading} className="browse-btn">
+        Browse...
+      </button>
       <button type="submit" disabled={loading || !path.trim()}>
         {loading ? "Scanning..." : "Scan"}
       </button>

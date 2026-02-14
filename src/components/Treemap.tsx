@@ -161,16 +161,9 @@ export function Treemap({ data, onRescan, onDelete, scanning, scanProgress }: Pr
     const path = contextMenu.node.data.path;
     setContextMenu(null);
     try {
-      const res = await fetch("/api/delete", {
-        method: "DELETE",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ path }),
-      });
-      if (!res.ok) {
-        const body = await res
-          .json()
-          .catch(() => ({ error: res.statusText }));
-        alert(`Delete failed: ${body.error || res.statusText}`);
+      const result = await window.api.deleteFile(path);
+      if (result.error) {
+        alert(`Delete failed: ${result.error}`);
         return;
       }
       onDelete(path);

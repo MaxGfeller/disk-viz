@@ -1,5 +1,6 @@
 import { readdir, stat } from "node:fs/promises";
 import { join, extname, basename } from "node:path";
+import { execFile } from "node:child_process";
 
 export interface TreeNode {
   name: string;
@@ -304,16 +305,14 @@ function applyChildLimits(node: TreeNode, depth: number): void {
 async function fastDirSize(dirPath: string, signal?: AbortSignal): Promise<number> {
   if (signal?.aborted) return 0;
   try {
-    const proc = Bun.spawn(["du", "-sk", dirPath], {
-      stdout: "pipe",
-      stderr: "ignore",
+    const text = await new Promise<string>((resolve, reject) => {
+      const child = execFile("du", ["-sk", dirPath], { timeout: 300_000 }, (err, stdout) => {
+        if (err) reject(err);
+        else resolve(stdout);
+      });
+      const onAbort = () => { child.kill(); reject(new DOMException("Aborted", "AbortError")); };
+      signal?.addEventListener("abort", onAbort, { once: true });
     });
-    const timeout = setTimeout(() => proc.kill(), 300_000);
-    const onAbort = () => { proc.kill(); clearTimeout(timeout); };
-    signal?.addEventListener("abort", onAbort, { once: true });
-    const text = await new Response(proc.stdout).text();
-    clearTimeout(timeout);
-    signal?.removeEventListener("abort", onAbort);
     if (signal?.aborted) return 0;
     const kb = parseInt(text.split("\t")[0], 10);
     return isNaN(kb) ? 0 : kb * 1024;

@@ -83,6 +83,15 @@ body {
   cursor: not-allowed;
 }
 
+.browse-btn {
+  background: #3a3a5a !important;
+  color: #e0e0e0 !important;
+}
+
+.browse-btn:hover:not(:disabled) {
+  background: #4a4a6a !important;
+}
+
 /* Legend */
 .legend {
   display: flex;

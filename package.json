@@ -2,8 +2,14 @@
   "name": "disk-viz",
   "version": "0.1.0",
   "private": true,
+  "main": "dist/main/electron/main.js",
   "scripts": {
-    "dev": "bun --hot server.ts"
+    "dev": "concurrently -k \"vite\" \"npm run dev:electron\"",
+    "dev:electron": "wait-on http://localhost:5173 && tsc -p tsconfig.electron.json && electron .",
+    "build:renderer": "vite build",
+    "build:main": "tsc -p tsconfig.electron.json",
+    "build": "npm run build:renderer && npm run build:main",
+    "package": "npm run build && electron-builder"
   },
   "dependencies": {
     "react": "^19.1.0",
@@ -14,7 +20,22 @@
     "@types/d3-hierarchy": "^3.1.7",
     "@types/react": "^19.1.8",
     "@types/react-dom": "^19.1.6",
-    "bun-types": "^1.3.9",
-    "typescript": "^5.8.3"
+    "@vitejs/plugin-react": "^4.3.4",
+    "concurrently": "^9.1.2",
+    "electron": "^33.3.1",
+    "electron-builder": "^25.1.8",
+    "typescript": "^5.8.3",
+    "vite": "^6.0.7",
+    "wait-on": "^8.0.3"
+  },
+  "build": {
+    "appId": "com.disk-viz.app",
+    "productName": "disk-viz",
+    "files": [
+      "dist/**/*"
+    ],
+    "mac": {
+      "target": "dmg"
+    }
   }
 }
