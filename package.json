@@ -34,8 +34,12 @@
     "files": [
       "dist/**/*"
     ],
+    "extraResources": [
+      { "from": "assets/icon.png", "to": "icon.png" }
+    ],
     "mac": {
-      "target": "dmg"
+      "target": "dmg",
+      "icon": "assets/icon.icns"
     }
   }
 }

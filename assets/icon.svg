@@ -1,0 +1,65 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <defs>
+    <clipPath id="squircle">
+      <rect width="1024" height="1024" rx="228"/>
+    </clipPath>
+    <linearGradient id="g-blue" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#6AB8F0"/>
+      <stop offset="100%" stop-color="#3474C0"/>
+    </linearGradient>
+    <linearGradient id="g-green" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#5CD892"/>
+      <stop offset="100%" stop-color="#28A060"/>
+    </linearGradient>
+    <linearGradient id="g-orange" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#FFBE6C"/>
+      <stop offset="100%" stop-color="#D4842A"/>
+    </linearGradient>
+    <linearGradient id="g-red" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#F07070"/>
+      <stop offset="100%" stop-color="#C43030"/>
+    </linearGradient>
+    <linearGradient id="g-purple" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#C484EC"/>
+      <stop offset="100%" stop-color="#8444B0"/>
+    </linearGradient>
+    <linearGradient id="g-gray" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#686074"/>
+      <stop offset="100%" stop-color="#403850"/>
+    </linearGradient>
+    <radialGradient id="bg-glow" cx="0.35" cy="0.35" r="0.8">
+      <stop offset="0%" stop-color="#182040"/>
+      <stop offset="100%" stop-color="#0C0D1E"/>
+    </radialGradient>
+  </defs>
+
+  <g clip-path="url(#squircle)">
+    <!-- Background with subtle glow -->
+    <rect width="1024" height="1024" fill="url(#bg-glow)"/>
+
+    <!-- Treemap blocks with 8px gaps, 8px border radius -->
+    <!-- Row 1: top -->
+    <!-- Blue (code) - dominant block, top-left -->
+    <rect x="96" y="96" width="482" height="502" rx="8" fill="url(#g-blue)"/>
+    <!-- Green (data) - top-right upper -->
+    <rect x="586" y="96" width="342" height="250" rx="8" fill="url(#g-green)"/>
+    <!-- Orange (media) - top-right lower -->
+    <rect x="586" y="354" width="342" height="244" rx="8" fill="url(#g-orange)"/>
+
+    <!-- Row 2: bottom -->
+    <!-- Purple (docs) - bottom-left -->
+    <rect x="96" y="606" width="226" height="322" rx="8" fill="url(#g-purple)"/>
+    <!-- Red (archives) - bottom-center -->
+    <rect x="330" y="606" width="240" height="322" rx="8" fill="url(#g-red)"/>
+    <!-- Small green - bottom-right left -->
+    <rect x="578" y="606" width="162" height="322" rx="8" fill="url(#g-green)" opacity="0.65"/>
+    <!-- Gray (other) - bottom-right upper -->
+    <rect x="748" y="606" width="180" height="154" rx="8" fill="url(#g-gray)"/>
+    <!-- Tiny blue - bottom-right lower -->
+    <rect x="748" y="768" width="180" height="160" rx="8" fill="url(#g-blue)" opacity="0.55"/>
+
+    <!-- Subtle disk arc overlay for the "disk" motif -->
+    <circle cx="512" cy="512" r="380" fill="none" stroke="rgba(255,255,255,0.06)" stroke-width="2"/>
+    <circle cx="512" cy="512" r="120" fill="none" stroke="rgba(255,255,255,0.04)" stroke-width="1.5"/>
+  </g>
+</svg>

@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, dialog } from "electron";
+import { app, BrowserWindow, ipcMain, dialog, nativeImage } from "electron";
 import { resolve, join } from "node:path";
 import { stat, rm, unlink } from "node:fs/promises";
 import { scanDirectoryStreaming, type ScanProgress, type TreeNode } from "../scanner";
@@ -20,7 +20,12 @@ interface ActiveScan {
 let activeScan: ActiveScan | null = null;
 
 function createWindow() {
+  const iconPath = isDev
+    ? join(__dirname, "../../assets/icon.png")
+    : join(process.resourcesPath, "icon.png");
+
   mainWindow = new BrowserWindow({
+    icon: nativeImage.createFromPath(iconPath),
     width: 1200,
     height: 800,
     minWidth: 600,
