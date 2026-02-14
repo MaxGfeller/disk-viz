@@ -5,11 +5,12 @@
 }
 
 body {
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
   background: #1a1a2e;
   color: #e0e0e0;
   overflow: hidden;
   height: 100vh;
+  -webkit-font-smoothing: antialiased;
 }
 
 #root {
@@ -24,80 +25,108 @@ body {
   height: 100vh;
 }
 
-/* Header */
+/* ── Toolbar (native-feeling, draggable) ── */
 .app-header {
   display: flex;
   align-items: center;
-  gap: 16px;
-  padding: 10px 16px;
-  background: #16213e;
-  border-bottom: 1px solid #2a2a4a;
+  gap: 12px;
+  padding: 0 16px 0 82px; /* 82px left to clear traffic lights */
+  height: 52px;
+  background: rgba(22, 33, 62, 0.85);
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
   flex-shrink: 0;
+  -webkit-app-region: drag;
+  user-select: none;
+}
+
+/* All interactive elements inside the toolbar must be non-draggable */
+.app-header input,
+.app-header button,
+.app-header .legend {
+  -webkit-app-region: no-drag;
 }
 
 .app-header h1 {
-  font-size: 18px;
+  font-size: 13px;
   font-weight: 600;
-  color: #7ec8e3;
+  color: rgba(255, 255, 255, 0.5);
   white-space: nowrap;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
 }
 
-/* Scan form */
+/* ── Scan form ── */
 .scan-form {
   display: flex;
-  gap: 8px;
+  gap: 6px;
+  align-items: center;
 }
 
 .scan-form input {
-  width: 320px;
-  padding: 6px 10px;
-  border: 1px solid #3a3a5a;
-  border-radius: 4px;
-  background: #0f3460;
+  width: 280px;
+  padding: 5px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.06);
   color: #e0e0e0;
-  font-size: 14px;
+  font-size: 13px;
+  font-family: "SF Mono", "Menlo", monospace;
+  transition: border-color 0.15s, background 0.15s;
 }
 
 .scan-form input:focus {
   outline: none;
-  border-color: #7ec8e3;
+  border-color: rgba(126, 200, 227, 0.5);
+  background: rgba(255, 255, 255, 0.1);
 }
 
 .scan-form button {
-  padding: 6px 16px;
-  border: none;
-  border-radius: 4px;
-  background: #7ec8e3;
-  color: #1a1a2e;
-  font-weight: 600;
-  font-size: 14px;
+  padding: 5px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.08);
+  color: #c8c8c8;
+  font-weight: 500;
+  font-size: 12px;
   cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+  white-space: nowrap;
 }
 
 .scan-form button:hover:not(:disabled) {
-  background: #a0d8ef;
+  background: rgba(255, 255, 255, 0.14);
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
+.scan-form button:active:not(:disabled) {
+  background: rgba(255, 255, 255, 0.06);
 }
 
 .scan-form button:disabled {
-  opacity: 0.5;
+  opacity: 0.35;
   cursor: not-allowed;
 }
 
-.browse-btn {
-  background: #3a3a5a !important;
-  color: #e0e0e0 !important;
+.scan-form button[type="submit"] {
+  background: rgba(126, 200, 227, 0.2);
+  border-color: rgba(126, 200, 227, 0.3);
+  color: #7ec8e3;
 }
 
-.browse-btn:hover:not(:disabled) {
-  background: #4a4a6a !important;
+.scan-form button[type="submit"]:hover:not(:disabled) {
+  background: rgba(126, 200, 227, 0.3);
+  border-color: rgba(126, 200, 227, 0.4);
 }
 
-/* Legend */
+/* ── Legend ── */
 .legend {
   display: flex;
-  gap: 12px;
+  gap: 10px;
   margin-left: auto;
-  font-size: 12px;
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.45);
 }
 
 .legend-item {
@@ -109,12 +138,12 @@ body {
 
 .legend-swatch {
   display: inline-block;
-  width: 10px;
-  height: 10px;
+  width: 8px;
+  height: 8px;
   border-radius: 2px;
 }
 
-/* Main area */
+/* ── Main area ── */
 .app-main {
   flex: 1;
   overflow: hidden;
@@ -128,20 +157,20 @@ body {
   justify-content: center;
   gap: 10px;
   height: 100%;
-  font-size: 16px;
-  color: #888;
+  font-size: 14px;
+  color: rgba(255, 255, 255, 0.35);
 }
 
 .status.error {
   color: #e74c3c;
 }
 
-/* Spinner */
+/* ── Spinner ── */
 .spinner {
-  width: 20px;
-  height: 20px;
-  border: 3px solid #3a3a5a;
-  border-top-color: #7ec8e3;
+  width: 18px;
+  height: 18px;
+  border: 2px solid rgba(255, 255, 255, 0.1);
+  border-top-color: rgba(126, 200, 227, 0.7);
   border-radius: 50%;
   animation: spin 0.8s linear infinite;
 }
@@ -152,17 +181,17 @@ body {
 
 .spinner-small {
   display: inline-block;
-  width: 12px;
-  height: 12px;
-  border: 2px solid #3a3a5a;
-  border-top-color: #7ec8e3;
+  width: 10px;
+  height: 10px;
+  border: 1.5px solid rgba(255, 255, 255, 0.1);
+  border-top-color: rgba(126, 200, 227, 0.7);
   border-radius: 50%;
   animation: spin 0.8s linear infinite;
   vertical-align: middle;
   margin-right: 6px;
 }
 
-/* Treemap container */
+/* ── Treemap container ── */
 .treemap-container {
   display: flex;
   flex-direction: column;
@@ -174,54 +203,55 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 8px 16px;
-  background: #16213e;
-  border-bottom: 1px solid #2a2a4a;
+  padding: 6px 16px;
+  background: rgba(22, 33, 62, 0.6);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
 }
 
 .treemap-total {
-  font-size: 13px;
-  color: #888;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.4);
 }
 
 .scan-progress {
-  color: #7ec8e3;
+  color: rgba(126, 200, 227, 0.8);
   font-weight: 600;
 }
 
-/* Breadcrumb */
+/* ── Breadcrumb ── */
 .breadcrumb {
   display: flex;
   align-items: center;
   gap: 2px;
-  font-size: 13px;
+  font-size: 12px;
 }
 
 .breadcrumb-sep {
-  color: #555;
-  margin: 0 4px;
+  color: rgba(255, 255, 255, 0.2);
+  margin: 0 2px;
 }
 
 .breadcrumb-btn {
   background: none;
   border: none;
-  color: #7ec8e3;
+  color: rgba(126, 200, 227, 0.7);
   cursor: pointer;
-  font-size: 13px;
+  font-size: 12px;
   padding: 2px 4px;
   border-radius: 3px;
+  transition: background 0.15s;
 }
 
 .breadcrumb-btn:hover {
-  background: rgba(126, 200, 227, 0.15);
+  background: rgba(126, 200, 227, 0.12);
 }
 
 .breadcrumb-current {
-  color: #e0e0e0;
+  color: rgba(255, 255, 255, 0.7);
   font-weight: 500;
 }
 
-/* SVG */
+/* ── SVG treemap ── */
 .treemap-svg-wrap {
   flex: 1;
   overflow: hidden;
@@ -235,7 +265,7 @@ body {
   fill: #fff;
   font-size: 11px;
   font-weight: 500;
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.7);
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8);
 }
 
 .rect-label-collapsed {
@@ -246,76 +276,87 @@ body {
 }
 
 .rect-size {
-  fill: rgba(255, 255, 255, 0.7);
+  fill: rgba(255, 255, 255, 0.6);
   font-size: 10px;
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.7);
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8);
 }
 
 .dir-label {
-  fill: rgba(255, 255, 255, 0.6);
+  fill: rgba(255, 255, 255, 0.5);
   font-size: 11px;
   font-weight: 600;
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.7);
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8);
 }
 
-/* Context menu */
+/* ── Context menu (native-feeling) ── */
 .context-menu {
   position: fixed;
   z-index: 1000;
   min-width: 180px;
-  background: #1e1e3a;
-  border: 1px solid #3a3a5a;
-  border-radius: 6px;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
-  padding: 6px 0;
+  background: rgba(30, 30, 50, 0.92);
+  backdrop-filter: blur(24px) saturate(180%);
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  box-shadow:
+    0 8px 32px rgba(0, 0, 0, 0.5),
+    0 1px 3px rgba(0, 0, 0, 0.3);
+  padding: 4px;
   font-size: 13px;
 }
 
 .context-menu-header {
-  padding: 6px 12px;
+  padding: 6px 8px;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 1px;
 }
 
 .context-menu-name {
   font-weight: 600;
   color: #e0e0e0;
   word-break: break-all;
+  font-size: 12px;
 }
 
 .context-menu-size {
-  color: #888;
+  color: rgba(255, 255, 255, 0.4);
   font-size: 11px;
 }
 
 .context-menu-divider {
   height: 1px;
-  background: #3a3a5a;
-  margin: 4px 0;
+  background: rgba(255, 255, 255, 0.08);
+  margin: 2px 0;
 }
 
 .context-menu-item {
   display: block;
   width: 100%;
-  padding: 6px 12px;
+  padding: 5px 8px;
   background: none;
   border: none;
   color: #e0e0e0;
   font-size: 13px;
   text-align: left;
   cursor: pointer;
+  border-radius: 4px;
+  transition: background 0.1s;
 }
 
 .context-menu-item:hover {
-  background: rgba(126, 200, 227, 0.15);
+  background: rgba(126, 200, 227, 0.2);
 }
 
 .context-menu-delete {
-  color: #e74c3c;
+  color: #ff6b6b;
 }
 
 .context-menu-confirm {
-  color: #e74c3c;
+  color: #ff6b6b;
   font-weight: 600;
+}
+
+.context-menu-confirm:hover {
+  background: rgba(231, 76, 60, 0.2) !important;
 }

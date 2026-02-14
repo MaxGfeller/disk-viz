@@ -23,7 +23,12 @@ function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1200,
     height: 800,
+    minWidth: 600,
+    minHeight: 400,
     backgroundColor: "#1a1a2e",
+    titleBarStyle: "hiddenInset",
+    trafficLightPosition: { x: 14, y: 14 },
+    vibrancy: "sidebar",
     webPreferences: {
       preload: join(__dirname, "preload.js"),
       contextIsolation: true,
