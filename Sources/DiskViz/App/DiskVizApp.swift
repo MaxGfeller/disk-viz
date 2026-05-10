@@ -6,12 +6,11 @@ struct DiskVizApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 
     var body: some Scene {
-        WindowGroup {
+        WindowGroup("DiskViz") {
             ContentView(initialScanPath: Self.initialScanPath)
                 .frame(minWidth: 900, minHeight: 620)
-                .preferredColorScheme(.dark)
         }
-        .windowStyle(.hiddenTitleBar)
+        .windowToolbarStyle(.unified)
         .commands {
             CommandGroup(replacing: .newItem) {}
         }

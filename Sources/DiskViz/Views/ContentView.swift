@@ -13,22 +13,32 @@ struct ContentView: View {
     var body: some View {
         VStack(spacing: 0) {
             ScanHeaderView(store: store)
+            Divider()
 
             ZStack {
-                Color(red: 0.10, green: 0.10, blue: 0.18)
+                Rectangle()
+                    .fill(.background)
 
                 if store.loading && store.root == nil {
-                    StatusView(text: "Scanning...", showsProgress: true)
+                    StatusView(
+                        text: "Scanning \(store.scanPath)",
+                        systemImage: "externaldrive",
+                        showsProgress: true
+                    )
                 } else if let error = store.errorMessage, store.root == nil {
-                    StatusView(text: "Error: \(error)", color: .red)
+                    StatusView(
+                        text: error,
+                        systemImage: "exclamationmark.triangle",
+                        color: .red
+                    )
                 } else if store.root != nil {
                     TreemapView(store: store, zoomPath: $zoomPath)
                 } else {
-                    StatusView(text: "Enter a directory path and click Scan")
+                    StatusView(text: "Choose a folder to scan", systemImage: "folder")
                 }
             }
         }
-        .background(Color(red: 0.10, green: 0.10, blue: 0.18))
+        .background(.background)
         .task {
             if store.root == nil && !store.scanning {
                 store.scan(initialScanPath)
@@ -71,19 +81,28 @@ struct ContentView: View {
 
 private struct StatusView: View {
     var text: String
-    var color: Color = .white.opacity(0.35)
+    var systemImage: String
+    var color: Color = .secondary
     var showsProgress = false
 
     var body: some View {
-        HStack(spacing: 10) {
+        VStack(spacing: 12) {
             if showsProgress {
                 ProgressView()
-                    .controlSize(.small)
+                    .controlSize(.regular)
+            } else {
+                Image(systemName: systemImage)
+                    .font(.system(size: 28, weight: .regular))
+                    .foregroundStyle(color.opacity(0.75))
             }
 
             Text(text)
-                .font(.system(size: 14, weight: .medium))
+                .font(.callout)
                 .foregroundStyle(color)
+                .lineLimit(2)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: 460)
         }
+        .padding(24)
     }
 }

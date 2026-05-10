@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 struct TreemapView: View {
@@ -16,6 +17,7 @@ struct TreemapView: View {
     var body: some View {
         VStack(spacing: 0) {
             header
+            Divider()
 
             GeometryReader { proxy in
                 if let currentNode {
@@ -36,7 +38,7 @@ struct TreemapView: View {
                         let leaves = nodes.filter(\.isLeaf)
 
                         ZStack(alignment: .topLeading) {
-                            Color(red: 0.10, green: 0.10, blue: 0.18)
+                            Color(nsColor: .controlBackgroundColor)
 
                             ForEach(groups) { group in
                                 DirectoryGroupView(
@@ -92,23 +94,19 @@ struct TreemapView: View {
 
                 if let progress = store.progress, progress.dirsFound > 0 {
                     Text("\(progress.percentComplete)%")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(Color(red: 0.49, green: 0.78, blue: 0.89).opacity(0.85))
+                        .font(.caption)
+                        .monospacedDigit()
+                        .foregroundStyle(.secondary)
                 }
             }
 
             Text("Total: \(ByteFormatter.string(from: currentNode?.size ?? 0))")
-                .font(.system(size: 12))
-                .foregroundStyle(.white.opacity(0.42))
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
         .padding(.horizontal, 16)
-        .frame(height: 32)
-        .background(Color(red: 0.09, green: 0.13, blue: 0.24).opacity(0.62))
-        .overlay(alignment: .bottom) {
-            Rectangle()
-                .fill(.white.opacity(0.04))
-                .frame(height: 1)
-        }
+        .frame(height: 34)
+        .background(.bar)
     }
 
     private func handleNodeClick(_ node: DiskNode) {
@@ -146,17 +144,17 @@ private struct DirectoryGroupView: View {
     var body: some View {
         let rect = layoutNode.rect
 
-        Rectangle()
-            .fill(.white.opacity(0.04))
+        RoundedRectangle(cornerRadius: 4, style: .continuous)
+            .fill(Color.primary.opacity(0.04))
             .overlay {
-                Rectangle()
-                    .stroke(.white.opacity(0.15), lineWidth: 1)
+                RoundedRectangle(cornerRadius: 4, style: .continuous)
+                    .stroke(.secondary.opacity(0.20), lineWidth: 1)
             }
             .overlay(alignment: .topLeading) {
                 if rect.width > 50 && rect.height > 18 {
                     Text("\(layoutNode.node.name) (\(ByteFormatter.string(from: Int64(layoutNode.value))))")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.50))
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.secondary)
                         .lineLimit(1)
                         .padding(.leading, 4)
                         .padding(.top, 3)
@@ -212,15 +210,16 @@ private struct TreemapLeafView: View {
         let sizeRatio = layoutNode.maxSiblingValue > 0
             ? layoutNode.value / layoutNode.maxSiblingValue
             : 0
+        let labelColor: Color = sizeRatio > 0.55 ? .white : .primary
 
-        Rectangle()
-            .fill(isCollapsed ? .white.opacity(0.06) : FileCategoryColor.color(for: layoutNode.node, sizeRatio: sizeRatio))
+        RoundedRectangle(cornerRadius: 3, style: .continuous)
+            .fill(isCollapsed ? Color.accentColor.opacity(0.12) : FileCategoryColor.color(for: layoutNode.node, sizeRatio: sizeRatio))
             .overlay {
-                Rectangle()
+                RoundedRectangle(cornerRadius: 3, style: .continuous)
                     .stroke(
                         isCollapsed
-                            ? Color(red: 0.49, green: 0.78, blue: 0.89)
-                            : (hovered ? .white : .black.opacity(0.30)),
+                            ? Color.accentColor
+                            : (hovered ? .primary.opacity(0.75) : Color(nsColor: .separatorColor).opacity(0.45)),
                         style: StrokeStyle(
                             lineWidth: isCollapsed ? 1 : (hovered ? 2 : 0.5),
                             dash: isCollapsed ? [4, 2] : []
@@ -228,7 +227,7 @@ private struct TreemapLeafView: View {
                     )
             }
             .overlay(alignment: .topLeading) {
-                labels(for: rect)
+                labels(for: rect, color: labelColor)
             }
             .frame(width: rect.width, height: rect.height)
             .position(x: rect.midX, y: rect.midY)
@@ -249,18 +248,18 @@ private struct TreemapLeafView: View {
     }
 
     @ViewBuilder
-    private func labels(for rect: CGRect) -> some View {
+    private func labels(for rect: CGRect, color: Color) -> some View {
         if rect.width > 40 && rect.height > 16 {
             VStack(alignment: .leading, spacing: 2) {
                 Text("\(isCollapsed ? "> " : "")\(truncatedName(width: rect.width))")
                     .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(isCollapsed ? Color(red: 0.49, green: 0.78, blue: 0.89) : .white)
+                    .foregroundStyle(isCollapsed ? Color.accentColor : color)
                     .lineLimit(1)
 
                 if rect.width > 60 && rect.height > 30 {
                     Text(ByteFormatter.string(from: displaySize))
                         .font(.system(size: 10))
-                        .foregroundStyle(.white.opacity(0.60))
+                        .foregroundStyle((isCollapsed ? Color.accentColor : color).opacity(0.72))
                         .lineLimit(1)
                 }
             }
