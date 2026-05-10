@@ -6,11 +6,6 @@ struct ScanHeaderView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 10) {
-                Image(systemName: "externaldrive")
-                    .font(.body)
-                    .foregroundStyle(.secondary)
-                    .frame(width: 20)
-
                 TextField("Folder path", text: $store.scanPath)
                     .textFieldStyle(.roundedBorder)
                     .font(.system(.body, design: .monospaced))
@@ -44,10 +39,6 @@ struct ScanHeaderView: View {
             HStack(spacing: 14) {
                 if let volumeInfo = store.volumeInfo {
                     DiskVolumeSummaryView(info: volumeInfo)
-                }
-
-                if store.scanning, let progress = store.progress, progress.dirsFound > 0 {
-                    ScanProgressSummaryView(progress: progress)
                 }
 
                 Spacer(minLength: 8)
@@ -93,25 +84,5 @@ private struct DiskVolumeSummaryView: View {
         }
         .fixedSize(horizontal: true, vertical: false)
         .help("\(ByteFormatter.string(from: info.freeBytes)) available on \(info.path)")
-    }
-}
-
-private struct ScanProgressSummaryView: View {
-    var progress: ScanProgress
-
-    var body: some View {
-        HStack(spacing: 6) {
-            ProgressView(value: progress.fractionComplete)
-                .progressViewStyle(.linear)
-                .frame(width: 92)
-
-            Text("\(progress.percentComplete)% scanned")
-                .font(.caption)
-                .monospacedDigit()
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-                .fixedSize(horizontal: true, vertical: false)
-        }
-        .fixedSize(horizontal: true, vertical: false)
     }
 }
