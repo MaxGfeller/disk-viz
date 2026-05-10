@@ -14,6 +14,26 @@ struct TreemapView: View {
         zoomPath.last ?? store.root
     }
 
+    private var collapseCandidates: [DiskNode] {
+        Array(
+            currentNode?.children?
+                .filter { $0.isDirectory && !isSyntheticNode($0) }
+                .prefix(12) ?? []
+        )
+    }
+
+    private var discoveredDiskUsage: DiskUsageCoverage? {
+        guard
+            let bytesFound = store.root?.size,
+            let usedBytes = store.volumeInfo?.usedBytes,
+            usedBytes > 0
+        else {
+            return nil
+        }
+
+        return DiskUsageCoverage(bytesFound: bytesFound, usedBytes: usedBytes)
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             header
@@ -86,23 +106,24 @@ struct TreemapView: View {
                 zoomPath = Array(zoomPath.prefix(index + 1))
             }
 
-            Spacer(minLength: 12)
-
-            if store.scanning {
-                ProgressView()
-                    .controlSize(.small)
-
-                if let progress = store.progress, progress.dirsFound > 0 {
-                    Text("\(progress.percentComplete)%")
-                        .font(.caption)
-                        .monospacedDigit()
-                        .foregroundStyle(.secondary)
-                }
+            if !collapseCandidates.isEmpty || hasCollapsedPathsInCurrentNode {
+                CollapseMenu(
+                    candidates: collapseCandidates,
+                    collapsedPaths: collapsedPaths,
+                    hasCollapsedPaths: hasCollapsedPathsInCurrentNode,
+                    onToggle: toggleCollapse,
+                    onExpandAll: expandCollapsedPathsInCurrentNode
+                )
             }
 
-            Text("Total: \(ByteFormatter.string(from: currentNode?.size ?? 0))")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            Spacer(minLength: 12)
+
+            if store.scanning || discoveredDiskUsage != nil {
+                DiskUsageCoverageStatus(
+                    coverage: discoveredDiskUsage,
+                    isScanning: store.scanning
+                )
+            }
         }
         .padding(.horizontal, 16)
         .frame(height: 34)
@@ -130,8 +151,123 @@ struct TreemapView: View {
         }
     }
 
+    private func toggleCollapse(_ node: DiskNode) {
+        if collapsedPaths.contains(node.path) {
+            collapsedPaths.remove(node.path)
+        } else {
+            collapsedPaths.insert(node.path)
+        }
+    }
+
+    private var hasCollapsedPathsInCurrentNode: Bool {
+        guard let currentNode else { return false }
+        return collapsedPaths.contains { path in
+            isPath(path, equalToOrDescendantOf: currentNode.path)
+        }
+    }
+
+    private func expandCollapsedPathsInCurrentNode() {
+        guard let currentNode else { return }
+        collapsedPaths = Set(
+            collapsedPaths.filter { path in
+                !isPath(path, equalToOrDescendantOf: currentNode.path)
+            }
+        )
+    }
+
     private static func loadCollapsedPaths() -> Set<String> {
         Set(UserDefaults.standard.stringArray(forKey: collapsedStorageKey) ?? [])
+    }
+}
+
+private struct DiskUsageCoverage {
+    var bytesFound: Int64
+    var usedBytes: Int64
+
+    var fraction: Double {
+        min(1, max(0, Double(bytesFound) / Double(usedBytes)))
+    }
+
+    var percent: Int {
+        Int((fraction * 100).rounded())
+    }
+}
+
+private struct DiskUsageCoverageStatus: View {
+    var coverage: DiskUsageCoverage?
+    var isScanning: Bool
+
+    var body: some View {
+        HStack(spacing: 6) {
+            if isScanning {
+                ProgressView()
+                    .controlSize(.small)
+            }
+
+            Text(label)
+                .font(.caption)
+                .monospacedDigit()
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
+        }
+        .help(helpText)
+    }
+
+    private var label: String {
+        guard let coverage else {
+            return "Scanning"
+        }
+
+        return "\(coverage.percent)%"
+    }
+
+    private var helpText: String {
+        guard let coverage else {
+            return "Scanning"
+        }
+
+        return "\(ByteFormatter.string(from: coverage.bytesFound)) found of \(ByteFormatter.string(from: coverage.usedBytes)) used disk"
+    }
+}
+
+private struct CollapseMenu: View {
+    var candidates: [DiskNode]
+    var collapsedPaths: Set<String>
+    var hasCollapsedPaths: Bool
+    var onToggle: (DiskNode) -> Void
+    var onExpandAll: () -> Void
+
+    var body: some View {
+        Menu {
+            ForEach(candidates) { node in
+                Button {
+                    onToggle(node)
+                } label: {
+                    Label(
+                        "\(collapsedPaths.contains(node.path) ? "Expand" : "Collapse") \(node.name)",
+                        systemImage: collapsedPaths.contains(node.path) ? "plus.square" : "minus.square"
+                    )
+                }
+            }
+
+            if hasCollapsedPaths {
+                if !candidates.isEmpty {
+                    Divider()
+                }
+
+                Button {
+                    onExpandAll()
+                } label: {
+                    Label("Expand All Collapsed Paths", systemImage: "plus.rectangle.on.rectangle")
+                }
+            }
+        } label: {
+            Image(systemName: "rectangle.compress.vertical")
+                .frame(width: 16)
+        }
+        .menuStyle(.borderlessButton)
+        .help("Collapse Paths")
     }
 }
 
@@ -141,8 +277,11 @@ private struct DirectoryGroupView: View {
     @Binding var pendingDelete: DiskNode?
     var onNodeClick: (DiskNode) -> Void
 
+    @State private var hovered = false
+
     var body: some View {
         let rect = layoutNode.rect
+        let isCollapsed = collapsedPaths.contains(layoutNode.node.path)
 
         RoundedRectangle(cornerRadius: 4, style: .continuous)
             .fill(Color.primary.opacity(0.04))
@@ -163,9 +302,25 @@ private struct DirectoryGroupView: View {
                         .allowsHitTesting(false)
                 }
             }
+            .overlay(alignment: .topTrailing) {
+                if rect.width > 70 && rect.height > 24 {
+                    Button {
+                        toggleCollapse(layoutNode.node)
+                    } label: {
+                        Image(systemName: isCollapsed ? "plus.square" : "minus.square")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .padding(4)
+                    }
+                    .buttonStyle(.plain)
+                    .opacity(hovered || isCollapsed ? 1 : 0.55)
+                    .help(isCollapsed ? "Expand Path" : "Collapse Path")
+                }
+            }
             .frame(width: rect.width, height: rect.height)
             .position(x: rect.midX, y: rect.midY)
             .contentShape(Rectangle())
+            .onHover { hovered = $0 }
             .onTapGesture {
                 onNodeClick(layoutNode.node)
             }
@@ -186,6 +341,22 @@ private struct DirectoryGroupView: View {
             collapsedPaths.insert(node.path)
         }
     }
+}
+
+private func isSyntheticNode(_ node: DiskNode) -> Bool {
+    node.path.hasSuffix("/__other__") || node.path.contains("__layout_other_")
+}
+
+private func isPath(_ path: String, equalToOrDescendantOf ancestor: String) -> Bool {
+    if path == ancestor {
+        return true
+    }
+
+    if ancestor == "/" {
+        return path.hasPrefix("/") && path != "/"
+    }
+
+    return path.hasPrefix(ancestor + "/")
 }
 
 private struct TreemapLeafView: View {
