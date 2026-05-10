@@ -10,12 +10,14 @@ final class DiskUsageStore: ObservableObject {
     @Published var errorMessage: String?
     @Published var progress: ScanProgress?
     @Published var scanPath = "/"
+    @Published var volumeInfo: DiskVolumeInfo?
 
     private let scanner = DiskScanner()
     private var scanTask: Task<Void, Never>?
 
     init(initialScanPath: String = "/") {
         self.scanPath = initialScanPath
+        refreshVolumeInfo(for: initialScanPath)
     }
 
     deinit {
@@ -28,6 +30,7 @@ final class DiskUsageStore: ObservableObject {
 
         scanTask?.cancel()
         scanPath = targetPath
+        refreshVolumeInfo(for: targetPath)
         root = nil
         loading = true
         scanning = true
@@ -86,9 +89,15 @@ final class DiskUsageStore: ObservableObject {
             if let currentRoot = root {
                 root = TreeOperations.removeNode(from: currentRoot, targetPath: node.path)
             }
+            refreshVolumeInfo()
         } catch {
             errorMessage = "Delete failed: \(error.localizedDescription)"
         }
+    }
+
+    func refreshVolumeInfo(for path: String? = nil) {
+        let targetPath = normalizedInput(path ?? scanPath)
+        volumeInfo = targetPath.isEmpty ? nil : DiskSpaceReader.volumeInfo(for: targetPath)
     }
 
     private func normalizedInput(_ path: String) -> String {
