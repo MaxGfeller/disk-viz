@@ -25,7 +25,9 @@ final class DiskScannerTests: XCTestCase {
             snapshots.append((tree, progress))
         }
 
-        let earlySnapshots = snapshots.filter { $0.progress.dirsCompleted == 0 }
+        let earlySnapshots = snapshots.filter { snapshot in
+            snapshot.progress.dirsCompleted < snapshot.progress.dirsFound
+        }
         XCTAssertTrue(
             earlySnapshots.contains { snapshot in
                 guard let parent = snapshot.tree.children?.first(where: { $0.name == "Parent" }) else {
@@ -50,5 +52,29 @@ final class DiskScannerTests: XCTestCase {
             },
             "Expected an in-progress snapshot to produce visible treemap nodes."
         )
+    }
+
+    func testTruncatedDirectorySizeUsesNativeTraversal() async throws {
+        let fileManager = FileManager.default
+        let rootURL = fileManager.temporaryDirectory
+            .appendingPathComponent("DiskVizScanner-\(UUID().uuidString)", isDirectory: true)
+        let nestedURL = rootURL
+            .appendingPathComponent("Child", isDirectory: true)
+            .appendingPathComponent("Grandchild", isDirectory: true)
+        let payload = Data(repeating: 1, count: 4096)
+
+        try fileManager.createDirectory(at: nestedURL, withIntermediateDirectories: true)
+        try payload.write(to: nestedURL.appendingPathComponent("payload.bin"))
+        defer {
+            try? fileManager.removeItem(at: rootURL)
+        }
+
+        let scanner = DiskScanner()
+        let tree = try await scanner.scanDirectoryStreaming(path: rootURL.path, maxDepth: 1) { _, _ in }
+        let child = try XCTUnwrap(tree.children?.first { $0.name == "Child" })
+
+        XCTAssertTrue(child.truncated)
+        XCTAssertNil(child.children)
+        XCTAssertGreaterThanOrEqual(child.size, Int64(payload.count))
     }
 }
