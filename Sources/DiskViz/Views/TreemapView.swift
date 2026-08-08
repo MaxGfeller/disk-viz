@@ -2,492 +2,323 @@ import AppKit
 import SwiftUI
 
 struct TreemapView: View {
-    private static let collapsedStorageKey = "disk-viz-collapsed"
-
     @ObservedObject var store: DiskUsageStore
-    @Binding var zoomPath: [DiskNode]
+    @Binding var focusPath: String?
+    @Binding var selectedNode: DiskNode?
+    @Binding var pendingTrash: DiskNode?
 
-    @State private var collapsedPaths = TreemapView.loadCollapsedPaths()
-    @State private var pendingDelete: DiskNode?
-
-    private var currentNode: DiskNode? {
-        zoomPath.last ?? store.root
-    }
-
-    private var collapseCandidates: [DiskNode] {
-        Array(
-            currentNode?.children?
-                .filter { $0.isDirectory && !isSyntheticNode($0) }
-                .prefix(12) ?? []
+    private var navigationPath: [DiskNode] {
+        guard let root = store.root else { return [] }
+        return TreeOperations.buildZoomPath(
+            root: root,
+            targetPath: focusPath ?? root.path
         )
     }
 
-    private var discoveredDiskUsage: DiskUsageCoverage? {
-        guard
-            let bytesFound = store.root?.size,
-            let usedBytes = store.volumeInfo?.usedBytes,
-            usedBytes > 0
-        else {
-            return nil
-        }
-
-        return DiskUsageCoverage(bytesFound: bytesFound, usedBytes: usedBytes)
+    private var currentNode: DiskNode? {
+        navigationPath.last ?? store.root
     }
 
     var body: some View {
         VStack(spacing: 0) {
-            header
+            navigationBar
             Divider()
 
             GeometryReader { proxy in
-                if let currentNode {
-                    let display = TreeOperations.withCollapsed(
-                        currentNode,
-                        collapsedPaths: collapsedPaths
-                    )
+                if let currentNode,
+                   let layout = TreemapLayoutEngine.layout(
+                       root: currentNode,
+                       width: max(0, proxy.size.width - 16),
+                       height: max(0, proxy.size.height - 16)
+                   ) {
+                    ZStack(alignment: .topLeading) {
+                        TreemapBackdrop()
 
-                    if let layout = TreemapLayoutEngine.layout(
-                        root: display.node,
-                        width: proxy.size.width,
-                        height: proxy.size.height
-                    ) {
-                        let nodes = layout.flattened
-                        let groups = nodes
-                            .filter { $0.depth > 0 && !$0.isLeaf }
-                            .sorted { $0.depth < $1.depth }
-                        let leaves = nodes.filter(\.isLeaf)
-
-                        ZStack(alignment: .topLeading) {
-                            Color(nsColor: .controlBackgroundColor)
-
-                            ForEach(groups) { group in
-                                DirectoryGroupView(
-                                    layoutNode: group,
-                                    collapsedPaths: $collapsedPaths,
-                                    pendingDelete: $pendingDelete,
-                                    onNodeClick: handleNodeClick
-                                )
-                            }
-
-                            ForEach(leaves) { leaf in
-                                TreemapLeafView(
-                                    layoutNode: leaf,
-                                    collapsedPaths: $collapsedPaths,
-                                    originalSize: display.originalSizes[leaf.node.path],
-                                    pendingDelete: $pendingDelete,
-                                    onNodeClick: handleNodeClick
+                        if layout.children.isEmpty {
+                            EmptyDirectoryView(node: currentNode, isScanning: store.scanning)
+                        } else {
+                            ForEach(layout.children) { child in
+                                TreemapTile(
+                                    layoutNode: child,
+                                    isSelected: selectedNode?.path == child.node.path,
+                                    store: store,
+                                    pendingTrash: $pendingTrash,
+                                    onActivate: activate
                                 )
                             }
                         }
-                        .frame(width: proxy.size.width, height: proxy.size.height)
-                        .clipped()
                     }
+                    .frame(width: proxy.size.width - 16, height: proxy.size.height - 16)
+                    .padding(8)
+                    .clipped()
                 }
             }
+
+            if let selectedNode, !isSyntheticDiskNode(selectedNode) {
+                Divider()
+                SelectedNodeBar(
+                    node: selectedNode,
+                    store: store,
+                    pendingTrash: $pendingTrash,
+                    onOpen: activate
+                )
+            }
         }
-        .onChange(of: collapsedPaths) { _, newValue in
-            UserDefaults.standard.set(Array(newValue), forKey: Self.collapsedStorageKey)
-        }
-        .alert(item: $pendingDelete) { node in
-            Alert(
-                title: Text("Delete \(node.name)?"),
-                message: Text(node.path),
-                primaryButton: .destructive(Text("Delete")) {
-                    store.delete(node)
-                },
-                secondaryButton: .cancel()
-            )
-        }
+        .background(Color(nsColor: .controlBackgroundColor))
     }
 
-    private var header: some View {
-        HStack {
-            BreadcrumbView(path: zoomPath) { index in
-                zoomPath = Array(zoomPath.prefix(index + 1))
+    private var navigationBar: some View {
+        HStack(spacing: 10) {
+            Button(action: navigateUp) {
+                Image(systemName: "chevron.left")
+                    .font(.system(size: 11, weight: .bold))
+                    .frame(width: 18, height: 18)
             }
+            .buttonStyle(.borderless)
+            .disabled(navigationPath.count <= 1)
+            .help("Go to Parent Folder (Esc)")
 
-            if !collapseCandidates.isEmpty || hasCollapsedPathsInCurrentNode {
-                CollapseMenu(
-                    candidates: collapseCandidates,
-                    collapsedPaths: collapsedPaths,
-                    hasCollapsedPaths: hasCollapsedPathsInCurrentNode,
-                    onToggle: toggleCollapse,
-                    onExpandAll: expandCollapsedPathsInCurrentNode
-                )
+            BreadcrumbView(path: navigationPath) { index in
+                focusPath = navigationPath[index].path
+                selectedNode = nil
             }
 
             Spacer(minLength: 12)
 
-            if store.scanning || discoveredDiskUsage != nil {
-                DiskUsageCoverageStatus(
-                    coverage: discoveredDiskUsage,
-                    isScanning: store.scanning
-                )
+            if let currentNode {
+                Text("\(currentNode.children?.count ?? 0) items")
+                    .foregroundStyle(.tertiary)
+                Text(ByteFormatter.string(from: currentNode.size))
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
             }
         }
-        .padding(.horizontal, 16)
-        .frame(height: 34)
+        .font(.caption)
+        .padding(.horizontal, 12)
+        .frame(height: 40)
         .background(.bar)
     }
 
-    private func handleNodeClick(_ node: DiskNode) {
-        guard !node.path.contains("__layout_other_") else { return }
+    private func activate(_ node: DiskNode) {
+        guard !isSyntheticDiskNode(node) else { return }
+        selectedNode = node
+
         guard node.isDirectory else { return }
-
-        if collapsedPaths.contains(node.path) {
-            collapsedPaths.remove(node.path)
-            return
-        }
-
-        if node.truncated || !(node.children?.isEmpty == false) {
-            if !store.scanning {
-                store.scan(node.path)
-            }
-            return
-        }
-
-        if let root = store.root {
-            zoomPath = TreeOperations.buildZoomPath(root: root, targetPath: node.path)
+        if node.hasChildren {
+            focusPath = node.path
+            selectedNode = nil
+        } else if node.truncated && !store.scanning {
+            store.scan(node.path)
         }
     }
 
-    private func toggleCollapse(_ node: DiskNode) {
-        if collapsedPaths.contains(node.path) {
-            collapsedPaths.remove(node.path)
-        } else {
-            collapsedPaths.insert(node.path)
-        }
-    }
-
-    private var hasCollapsedPathsInCurrentNode: Bool {
-        guard let currentNode else { return false }
-        return collapsedPaths.contains { path in
-            isPath(path, equalToOrDescendantOf: currentNode.path)
-        }
-    }
-
-    private func expandCollapsedPathsInCurrentNode() {
-        guard let currentNode else { return }
-        collapsedPaths = Set(
-            collapsedPaths.filter { path in
-                !isPath(path, equalToOrDescendantOf: currentNode.path)
-            }
-        )
-    }
-
-    private static func loadCollapsedPaths() -> Set<String> {
-        Set(UserDefaults.standard.stringArray(forKey: collapsedStorageKey) ?? [])
+    private func navigateUp() {
+        guard navigationPath.count > 1 else { return }
+        focusPath = navigationPath[navigationPath.count - 2].path
+        selectedNode = nil
     }
 }
 
-private struct DiskUsageCoverage {
-    var bytesFound: Int64
-    var usedBytes: Int64
-
-    var fraction: Double {
-        min(1, max(0, Double(bytesFound) / Double(usedBytes)))
-    }
-
-    var percent: Int {
-        Int((fraction * 100).rounded())
-    }
-}
-
-private struct DiskUsageCoverageStatus: View {
-    var coverage: DiskUsageCoverage?
-    var isScanning: Bool
-
+private struct TreemapBackdrop: View {
     var body: some View {
-        HStack(spacing: 6) {
-            if isScanning {
-                ProgressView()
-                    .controlSize(.small)
-            }
+        ZStack {
+            Color(nsColor: .underPageBackgroundColor)
 
-            Text(label)
-                .font(.caption)
-                .monospacedDigit()
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-                .fixedSize(horizontal: true, vertical: false)
+            LinearGradient(
+                colors: [
+                    Color.accentColor.opacity(0.035),
+                    Color.clear,
+                    Color.primary.opacity(0.018)
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
         }
-        .help(helpText)
-    }
-
-    private var label: String {
-        guard let coverage else {
-            return "Scanning"
-        }
-
-        return "\(coverage.percent)%"
-    }
-
-    private var helpText: String {
-        guard let coverage else {
-            return "Scanning"
-        }
-
-        return "\(ByteFormatter.string(from: coverage.bytesFound)) found of \(ByteFormatter.string(from: coverage.usedBytes)) used disk"
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
 }
 
-private struct CollapseMenu: View {
-    var candidates: [DiskNode]
-    var collapsedPaths: Set<String>
-    var hasCollapsedPaths: Bool
-    var onToggle: (DiskNode) -> Void
-    var onExpandAll: () -> Void
-
-    var body: some View {
-        Menu {
-            ForEach(candidates) { node in
-                Button {
-                    onToggle(node)
-                } label: {
-                    Label(
-                        "\(collapsedPaths.contains(node.path) ? "Expand" : "Collapse") \(node.name)",
-                        systemImage: collapsedPaths.contains(node.path) ? "plus.square" : "minus.square"
-                    )
-                }
-            }
-
-            if hasCollapsedPaths {
-                if !candidates.isEmpty {
-                    Divider()
-                }
-
-                Button {
-                    onExpandAll()
-                } label: {
-                    Label("Expand All Collapsed Paths", systemImage: "plus.rectangle.on.rectangle")
-                }
-            }
-        } label: {
-            Image(systemName: "rectangle.compress.vertical")
-                .frame(width: 16)
-        }
-        .menuStyle(.borderlessButton)
-        .help("Collapse Paths")
-    }
-}
-
-private struct DirectoryGroupView: View {
+private struct TreemapTile: View {
     var layoutNode: TreemapLayoutNode
-    @Binding var collapsedPaths: Set<String>
-    @Binding var pendingDelete: DiskNode?
-    var onNodeClick: (DiskNode) -> Void
+    var isSelected: Bool
+    @ObservedObject var store: DiskUsageStore
+    @Binding var pendingTrash: DiskNode?
+    var onActivate: (DiskNode) -> Void
 
     @State private var hovered = false
 
-    var body: some View {
-        let rect = layoutNode.rect
-        let isCollapsed = collapsedPaths.contains(layoutNode.node.path)
+    private var visualRect: CGRect {
+        let amount = min(2, max(0, min(layoutNode.rect.width, layoutNode.rect.height) / 8))
+        return layoutNode.rect.insetBy(dx: amount, dy: amount)
+    }
 
-        RoundedRectangle(cornerRadius: 4, style: .continuous)
-            .fill(Color.primary.opacity(0.04))
-            .overlay {
-                RoundedRectangle(cornerRadius: 4, style: .continuous)
-                    .stroke(.secondary.opacity(0.20), lineWidth: 1)
-            }
-            .overlay(alignment: .topLeading) {
-                if rect.width > 50 && rect.height > 18 {
-                    Text("\(layoutNode.node.name) (\(ByteFormatter.string(from: Int64(layoutNode.value))))")
-                        .font(.caption2.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .padding(.leading, 4)
-                        .padding(.top, 3)
-                        .frame(maxWidth: max(0, rect.width - 8), alignment: .leading)
-                        .clipped()
-                        .allowsHitTesting(false)
-                }
-            }
-            .overlay(alignment: .topTrailing) {
-                if rect.width > 70 && rect.height > 24 {
-                    Button {
-                        toggleCollapse(layoutNode.node)
-                    } label: {
-                        Image(systemName: isCollapsed ? "plus.square" : "minus.square")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .padding(4)
-                    }
-                    .buttonStyle(.plain)
-                    .opacity(hovered || isCollapsed ? 1 : 0.55)
-                    .help(isCollapsed ? "Expand Path" : "Collapse Path")
-                }
-            }
-            .frame(width: rect.width, height: rect.height)
-            .position(x: rect.midX, y: rect.midY)
-            .contentShape(Rectangle())
-            .onHover { hovered = $0 }
-            .onTapGesture {
-                onNodeClick(layoutNode.node)
-            }
-            .contextMenu {
-                NodeContextMenu(
-                    node: layoutNode.node,
-                    isCollapsed: collapsedPaths.contains(layoutNode.node.path),
-                    pendingDelete: $pendingDelete,
-                    onToggleCollapse: toggleCollapse
+    private var sizeRatio: Double {
+        guard layoutNode.maxSiblingValue > 0 else { return 0 }
+        return min(1, max(0, layoutNode.value / layoutNode.maxSiblingValue))
+    }
+
+    private var tileColor: Color {
+        if layoutNode.node.isDirectory {
+            let brightness = 0.76 - (sizeRatio * 0.34)
+            return Color(hue: 0.58, saturation: 0.58, brightness: brightness)
+        }
+        return FileCategoryColor.color(for: layoutNode.node, sizeRatio: sizeRatio)
+    }
+
+    var body: some View {
+        let rect = visualRect
+
+        RoundedRectangle(cornerRadius: min(8, max(3, rect.height / 10)), style: .continuous)
+            .fill(
+                LinearGradient(
+                    colors: [tileColor.opacity(0.98), tileColor.opacity(0.78)],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
                 )
-            }
-    }
-
-    private func toggleCollapse(_ node: DiskNode) {
-        if collapsedPaths.contains(node.path) {
-            collapsedPaths.remove(node.path)
-        } else {
-            collapsedPaths.insert(node.path)
-        }
-    }
-}
-
-private func isSyntheticNode(_ node: DiskNode) -> Bool {
-    node.path.hasSuffix("/__other__") || node.path.contains("__layout_other_")
-}
-
-private func isPath(_ path: String, equalToOrDescendantOf ancestor: String) -> Bool {
-    if path == ancestor {
-        return true
-    }
-
-    if ancestor == "/" {
-        return path.hasPrefix("/") && path != "/"
-    }
-
-    return path.hasPrefix(ancestor + "/")
-}
-
-private struct TreemapLeafView: View {
-    var layoutNode: TreemapLayoutNode
-    @Binding var collapsedPaths: Set<String>
-    var originalSize: Int64?
-    @Binding var pendingDelete: DiskNode?
-    var onNodeClick: (DiskNode) -> Void
-
-    @State private var hovered = false
-
-    private var isCollapsed: Bool {
-        collapsedPaths.contains(layoutNode.node.path)
-    }
-
-    private var displaySize: Int64 {
-        originalSize ?? Int64(layoutNode.value)
-    }
-
-    var body: some View {
-        let rect = layoutNode.rect
-        let sizeRatio = layoutNode.maxSiblingValue > 0
-            ? layoutNode.value / layoutNode.maxSiblingValue
-            : 0
-        let labelColor: Color = sizeRatio > 0.55 ? .white : .primary
-
-        RoundedRectangle(cornerRadius: 3, style: .continuous)
-            .fill(isCollapsed ? Color.accentColor.opacity(0.12) : FileCategoryColor.color(for: layoutNode.node, sizeRatio: sizeRatio))
+            )
             .overlay {
-                RoundedRectangle(cornerRadius: 3, style: .continuous)
-                    .stroke(
-                        isCollapsed
+                RoundedRectangle(cornerRadius: min(8, max(3, rect.height / 10)), style: .continuous)
+                    .strokeBorder(
+                        isSelected
                             ? Color.accentColor
-                            : (hovered ? .primary.opacity(0.75) : Color(nsColor: .separatorColor).opacity(0.45)),
-                        style: StrokeStyle(
-                            lineWidth: isCollapsed ? 1 : (hovered ? 2 : 0.5),
-                            dash: isCollapsed ? [4, 2] : []
-                        )
+                            : Color.white.opacity(hovered ? 0.75 : 0.20),
+                        lineWidth: isSelected ? 3 : (hovered ? 2 : 1)
                     )
             }
             .overlay(alignment: .topLeading) {
-                labels(for: rect, color: labelColor)
+                tileLabel(in: rect)
             }
+            .shadow(color: .black.opacity(hovered ? 0.20 : 0.08), radius: hovered ? 5 : 1, y: 1)
             .frame(width: rect.width, height: rect.height)
             .position(x: rect.midX, y: rect.midY)
             .contentShape(Rectangle())
+            .scaleEffect(hovered && rect.width > 28 && rect.height > 28 ? 0.992 : 1)
+            .animation(.easeOut(duration: 0.12), value: hovered)
             .onHover { hovered = $0 }
             .onTapGesture {
-                onNodeClick(layoutNode.node)
+                onActivate(layoutNode.node)
             }
-            .help("\(layoutNode.node.name) - \(ByteFormatter.string(from: displaySize))\(isCollapsed ? " (collapsed)" : "")")
+            .help("\(layoutNode.node.name) — \(ByteFormatter.string(from: layoutNode.node.size))")
             .contextMenu {
-                NodeContextMenu(
+                NodeActionsMenu(
                     node: layoutNode.node,
-                    isCollapsed: isCollapsed,
-                    pendingDelete: $pendingDelete,
-                    onToggleCollapse: toggleCollapse
+                    store: store,
+                    pendingTrash: $pendingTrash
                 )
             }
     }
 
     @ViewBuilder
-    private func labels(for rect: CGRect, color: Color) -> some View {
-        if rect.width > 40 && rect.height > 16 {
-            VStack(alignment: .leading, spacing: 2) {
-                Text("\(isCollapsed ? "> " : "")\(truncatedName(width: rect.width))")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(isCollapsed ? Color.accentColor : color)
-                    .lineLimit(1)
+    private func tileLabel(in rect: CGRect) -> some View {
+        if rect.width > 54 && rect.height > 24 {
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 5) {
+                    Image(systemName: layoutNode.node.isDirectory ? "folder.fill" : "doc.fill")
+                        .font(.system(size: 10, weight: .semibold))
 
-                if rect.width > 60 && rect.height > 30 {
-                    Text(ByteFormatter.string(from: displaySize))
-                        .font(.system(size: 10))
-                        .foregroundStyle((isCollapsed ? Color.accentColor : color).opacity(0.72))
+                    Text(layoutNode.node.name)
+                        .font(.system(size: 12, weight: .semibold, design: .rounded))
                         .lineLimit(1)
                 }
+
+                if rect.width > 82 && rect.height > 44 {
+                    Text(ByteFormatter.string(from: layoutNode.node.size))
+                        .font(.system(size: 10, weight: .medium, design: .rounded))
+                        .monospacedDigit()
+                        .opacity(0.82)
+                }
             }
-            .padding(.leading, 4)
-            .padding(.top, 3)
+            .foregroundStyle(Color.white)
+            .shadow(color: .black.opacity(0.35), radius: 1, y: 1)
+            .padding(.horizontal, min(9, max(4, rect.width / 12)))
+            .padding(.top, min(8, max(4, rect.height / 12)))
             .frame(maxWidth: max(0, rect.width - 8), alignment: .leading)
             .allowsHitTesting(false)
         }
     }
+}
 
-    private func truncatedName(width: CGFloat) -> String {
-        let prefixWidth = isCollapsed ? 2 : 0
-        let maxLength = max(0, Int(width / 7) - prefixWidth)
-        let name = layoutNode.node.name
+private struct SelectedNodeBar: View {
+    var node: DiskNode
+    @ObservedObject var store: DiskUsageStore
+    @Binding var pendingTrash: DiskNode?
+    var onOpen: (DiskNode) -> Void
 
-        guard maxLength >= 3 else { return "" }
-        guard name.count > maxLength else { return name }
+    var body: some View {
+        HStack(spacing: 10) {
+            RoundedRectangle(cornerRadius: 3)
+                .fill(FileCategoryColor.color(for: node, sizeRatio: 0.8))
+                .frame(width: 7, height: 34)
 
-        let endIndex = name.index(name.startIndex, offsetBy: maxLength - 3)
-        return String(name[..<endIndex]) + "..."
-    }
+            VStack(alignment: .leading, spacing: 2) {
+                Text(node.name)
+                    .font(.callout.weight(.semibold))
+                    .lineLimit(1)
+                Text(node.path)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
 
-    private func toggleCollapse(_ node: DiskNode) {
-        if collapsedPaths.contains(node.path) {
-            collapsedPaths.remove(node.path)
-        } else {
-            collapsedPaths.insert(node.path)
+            Spacer(minLength: 8)
+
+            Text(ByteFormatter.string(from: node.size))
+                .font(.callout.weight(.medium))
+                .monospacedDigit()
+
+            if node.isDirectory && node.hasChildren {
+                Button("Open") {
+                    onOpen(node)
+                }
+            }
+
+            Button {
+                store.revealInFinder(node)
+            } label: {
+                Label("Reveal", systemImage: "finder")
+            }
+
+            Menu {
+                NodeActionsMenu(node: node, store: store, pendingTrash: $pendingTrash)
+            } label: {
+                Image(systemName: "ellipsis")
+            }
+            .menuStyle(.borderlessButton)
+            .frame(width: 24)
         }
+        .controlSize(.small)
+        .padding(.horizontal, 12)
+        .frame(height: 54)
+        .background(.bar)
     }
 }
 
-private struct NodeContextMenu: View {
+private struct EmptyDirectoryView: View {
     var node: DiskNode
-    var isCollapsed: Bool
-    @Binding var pendingDelete: DiskNode?
-    var onToggleCollapse: (DiskNode) -> Void
-
-    private var canDelete: Bool {
-        !node.path.hasSuffix("/__other__") && !node.path.contains("__layout_other_")
-    }
+    var isScanning: Bool
 
     var body: some View {
-        Text(node.name)
-        Text(ByteFormatter.string(from: node.size))
+        VStack(spacing: 10) {
+            if isScanning {
+                ProgressView()
+                    .controlSize(.small)
+            } else {
+                Image(systemName: "folder")
+                    .font(.system(size: 26))
+                    .foregroundStyle(.tertiary)
+            }
 
-        if node.isDirectory {
-            Divider()
-            Button(isCollapsed ? "Expand" : "Collapse") {
-                onToggleCollapse(node)
+            Text(isScanning ? "Discovering contents…" : "No visible contents")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+
+            if node.truncated {
+                Text("Open this folder to scan it in more detail.")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
             }
         }
-
-        if canDelete {
-            Divider()
-            Button("Delete", role: .destructive) {
-                pendingDelete = node
-            }
-        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }

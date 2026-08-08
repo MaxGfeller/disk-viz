@@ -28,6 +28,28 @@ enum TreeOperations {
         return result
     }
 
+    static func node(in root: DiskNode, atPath targetPath: String) -> DiskNode? {
+        if root.path == targetPath {
+            return root
+        }
+
+        guard isDescendantPath(targetPath, of: root.path) else {
+            return nil
+        }
+
+        for child in root.children ?? [] {
+            if let match = node(in: child, atPath: targetPath) {
+                return match
+            }
+        }
+
+        return nil
+    }
+
+    static func isPath(_ path: String, equalToOrDescendantOf ancestor: String) -> Bool {
+        path == ancestor || isDescendantPath(path, of: ancestor)
+    }
+
     static func withCollapsed(
         _ node: DiskNode,
         collapsedPaths: Set<String>
