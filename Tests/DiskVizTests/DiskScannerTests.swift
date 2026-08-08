@@ -192,6 +192,14 @@ final class DiskScannerTests: XCTestCase {
                 isScanRoot: false
             )
         )
+        XCTAssertFalse(
+            DiskScanner.shouldScanURL(
+                path: "/.nofollow/",
+                isSymbolicLink: false,
+                isVolume: false,
+                isScanRoot: false
+            )
+        )
         XCTAssertTrue(
             DiskScanner.shouldScanURL(
                 path: "/tmp/.nofollow",

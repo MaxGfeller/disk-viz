@@ -293,7 +293,7 @@ final class DiskScanner {
         // `/.nofollow` is macOS's hidden physical-root mirror. Foundation reports
         // it as a volume when queried directly, but its prefetched directory value
         // is false. Traversing it duplicates /Users, /Library, and other firmlinks.
-        if !isScanRoot, path == "/.nofollow" {
+        if !isScanRoot, path == "/.nofollow" || path == "/.nofollow/" {
             return false
         }
         return isScanRoot || isVolume != true
