@@ -44,15 +44,22 @@ struct DiskNode: Identifiable, Hashable, Sendable {
 }
 
 struct ScanProgress: Equatable, Sendable {
-    var dirsFound: Int
-    var dirsCompleted: Int
+    var dirsFound = 0
+    var dirsCompleted = 0
+    var filesFound = 0
+    var bytesFound: Int64 = 0
+    var inaccessibleDirs = 0
+    var currentPath: String?
+}
 
-    var fractionComplete: Double {
-        guard dirsFound > 0 else { return 0 }
-        return min(1, Double(dirsCompleted) / Double(dirsFound))
-    }
+struct ScanSnapshot: Equatable, Sendable {
+    var root: DiskNode
+    var progress: ScanProgress
+    var largestFiles: [DiskNode]
+}
 
-    var percentComplete: Int {
-        Int((fractionComplete * 100).rounded())
-    }
+struct DiskScanResult: Equatable, Sendable {
+    var root: DiskNode
+    var progress: ScanProgress
+    var largestFiles: [DiskNode]
 }
