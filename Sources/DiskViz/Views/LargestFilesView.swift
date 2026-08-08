@@ -82,13 +82,36 @@ struct LargestFilesView: View {
     }
 
     private var listScopeLabel: String {
+        let inaccessibleCount = store.progress?.inaccessibleDirs ?? 0
+
         if store.scanning {
+            if inaccessibleCount > 0 {
+                return "Updating readable folders; \(inaccessibleCount.formatted()) inaccessible"
+            }
             return "Updating across all folders"
         }
         if store.scanStopped {
+            if inaccessibleCount > 0 {
+                return "Partial results; \(inaccessibleCount.formatted()) folders inaccessible"
+            }
             return "Partial results from stopped scan"
         }
+        if hasIncompleteScanError {
+            if inaccessibleCount > 0 {
+                return "Partial after scan error; \(inaccessibleCount.formatted()) inaccessible"
+            }
+            return "Partial results after scan error"
+        }
+        if inaccessibleCount > 0 {
+            return "Largest readable files; \(inaccessibleCount.formatted()) folders inaccessible"
+        }
         return "Across the complete scan"
+    }
+
+    private var hasIncompleteScanError: Bool {
+        guard store.errorMessage != nil else { return false }
+        guard let progress = store.progress else { return true }
+        return progress.dirsCompleted < progress.dirsFound
     }
 
     private var emptyState: some View {
@@ -127,30 +150,47 @@ private struct LargestFileRow: View {
 
     @State private var hovered = false
 
+    private var parentPath: String {
+        URL(fileURLWithPath: file.path).deletingLastPathComponent().path
+    }
+
     var body: some View {
-        HStack(spacing: 9) {
-            RoundedRectangle(cornerRadius: 2)
-                .fill(FileCategoryColor.color(for: file, sizeRatio: 0.78))
-                .frame(width: 5, height: 34)
+        HStack(spacing: 8) {
+            Button(action: onSelect) {
+                HStack(spacing: 9) {
+                    RoundedRectangle(cornerRadius: 2)
+                        .fill(FileCategoryColor.color(for: file, sizeRatio: 0.78))
+                        .frame(width: 5, height: 34)
 
-            VStack(alignment: .leading, spacing: 3) {
-                Text(file.name)
-                    .font(.callout.weight(.medium))
-                    .lineLimit(1)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(file.name)
+                            .font(.callout.weight(.medium))
+                            .lineLimit(1)
 
-                Text(URL(fileURLWithPath: file.path).deletingLastPathComponent().path)
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
+                        Text(parentPath)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                    }
+
+                    Spacer(minLength: 6)
+
+                    Text(ByteFormatter.string(from: file.size))
+                        .font(.caption.weight(.semibold))
+                        .monospacedDigit()
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, minHeight: 50, alignment: .leading)
+                .contentShape(Rectangle())
             }
-
-            Spacer(minLength: 6)
-
-            Text(ByteFormatter.string(from: file.size))
-                .font(.caption.weight(.semibold))
-                .monospacedDigit()
-                .foregroundStyle(.secondary)
+            .buttonStyle(.plain)
+            .accessibilityLabel(Text(file.name))
+            .accessibilityValue(Text("\(ByteFormatter.string(from: file.size)), in \(parentPath)"))
+            .accessibilityHint(Text("Select this file."))
+            .accessibilityAction(named: Text("Reveal in Finder")) {
+                store.revealInFinder(file)
+            }
 
             if hovered || isSelected {
                 Button {
@@ -161,6 +201,7 @@ private struct LargestFileRow: View {
                 }
                 .buttonStyle(.borderless)
                 .help("Reveal in Finder")
+                .accessibilityLabel(Text("Reveal \(file.name) in Finder"))
             }
         }
         .padding(.horizontal, 10)
@@ -175,7 +216,6 @@ private struct LargestFileRow: View {
         )
         .padding(.horizontal, 5)
         .contentShape(Rectangle())
-        .onTapGesture(perform: onSelect)
         .onHover { hovered = $0 }
         .help("\(file.path) — \(ByteFormatter.string(from: file.size))")
         .contextMenu {

@@ -168,44 +168,66 @@ private struct TreemapTile: View {
     var body: some View {
         let rect = visualRect
 
-        RoundedRectangle(cornerRadius: min(8, max(3, rect.height / 10)), style: .continuous)
-            .fill(
-                LinearGradient(
-                    colors: [tileColor.opacity(0.98), tileColor.opacity(0.78)],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-            )
-            .overlay {
-                RoundedRectangle(cornerRadius: min(8, max(3, rect.height / 10)), style: .continuous)
-                    .strokeBorder(
-                        isSelected
-                            ? Color.accentColor
-                            : Color.white.opacity(hovered ? 0.75 : 0.20),
-                        lineWidth: isSelected ? 3 : (hovered ? 2 : 1)
+        Button {
+            onActivate(layoutNode.node)
+        } label: {
+            RoundedRectangle(cornerRadius: min(8, max(3, rect.height / 10)), style: .continuous)
+                .fill(
+                    LinearGradient(
+                        colors: [tileColor.opacity(0.98), tileColor.opacity(0.78)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
                     )
-            }
-            .overlay(alignment: .topLeading) {
-                tileLabel(in: rect)
-            }
-            .shadow(color: .black.opacity(hovered ? 0.20 : 0.08), radius: hovered ? 5 : 1, y: 1)
-            .frame(width: rect.width, height: rect.height)
-            .position(x: rect.midX, y: rect.midY)
-            .contentShape(Rectangle())
-            .scaleEffect(hovered && rect.width > 28 && rect.height > 28 ? 0.992 : 1)
-            .animation(.easeOut(duration: 0.12), value: hovered)
-            .onHover { hovered = $0 }
-            .onTapGesture {
-                onActivate(layoutNode.node)
-            }
-            .help("\(layoutNode.node.name) — \(ByteFormatter.string(from: layoutNode.node.size))")
-            .contextMenu {
-                NodeActionsMenu(
-                    node: layoutNode.node,
-                    store: store,
-                    pendingTrash: $pendingTrash
                 )
-            }
+                .overlay {
+                    RoundedRectangle(cornerRadius: min(8, max(3, rect.height / 10)), style: .continuous)
+                        .strokeBorder(
+                            isSelected
+                                ? Color.accentColor
+                                : Color.white.opacity(hovered ? 0.75 : 0.20),
+                            lineWidth: isSelected ? 3 : (hovered ? 2 : 1)
+                        )
+                }
+                .overlay(alignment: .topLeading) {
+                    tileLabel(in: rect)
+                }
+                .shadow(color: .black.opacity(hovered ? 0.20 : 0.08), radius: hovered ? 5 : 1, y: 1)
+                .frame(width: rect.width, height: rect.height)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .position(x: rect.midX, y: rect.midY)
+        .contentShape(Rectangle())
+        .accessibilityLabel(Text(layoutNode.node.name))
+        .accessibilityValue(
+            Text("\(ByteFormatter.string(from: layoutNode.node.size)), \(layoutNode.node.isDirectory ? "folder" : "file")")
+        )
+        .accessibilityHint(Text(accessibilityHint))
+        .accessibilityAction(named: Text("Reveal in Finder")) {
+            store.revealInFinder(layoutNode.node)
+        }
+        .scaleEffect(hovered && rect.width > 28 && rect.height > 28 ? 0.992 : 1)
+        .animation(.easeOut(duration: 0.12), value: hovered)
+        .onHover { hovered = $0 }
+        .help("\(layoutNode.node.name) — \(ByteFormatter.string(from: layoutNode.node.size))")
+        .contextMenu {
+            NodeActionsMenu(
+                node: layoutNode.node,
+                store: store,
+                pendingTrash: $pendingTrash
+            )
+        }
+    }
+
+    private var accessibilityHint: String {
+        let node = layoutNode.node
+        if node.isDirectory && node.hasChildren {
+            return "Open this folder in the treemap."
+        }
+        if node.isDirectory && node.truncated && !store.scanning {
+            return "Scan this folder in more detail."
+        }
+        return node.isDirectory ? "Select this folder." : "Select this file."
     }
 
     @ViewBuilder
