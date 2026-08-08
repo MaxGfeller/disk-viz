@@ -2,7 +2,7 @@
 import XCTest
 
 final class TreemapLayoutEngineTests: XCTestCase {
-    func testLayoutPreservesRootSiblingsWhenFirstChildHasDeepTree() throws {
+    func testLayoutKeepsRootSiblingsAsUsableDirectChildTiles() throws {
         let root = DiskNode(
             name: "fixture",
             path: "/fixture",
@@ -23,32 +23,126 @@ final class TreemapLayoutEngineTests: XCTestCase {
         XCTAssertTrue(rootNames.contains("Users"))
         XCTAssertTrue(rootNames.contains("Library"))
         XCTAssertTrue(rootNames.contains("System"))
+        XCTAssertEqual(layout.flattened.count, 5)
 
         for child in layout.children {
+            XCTAssertEqual(child.depth, 1, child.node.name)
+            XCTAssertTrue(child.children.isEmpty, child.node.name)
             XCTAssertGreaterThan(child.rect.width, 0, child.node.name)
             XCTAssertGreaterThan(child.rect.height, 0, child.node.name)
         }
     }
 
-    func testLayoutCollapsesDeepNodesIntoClickableDirectoryTiles() throws {
+    func testLayoutPreservesDirectoryChildrenAndScanTruncationSemantics() throws {
+        let scannedDirectory = deepDirectory(
+            name: "Applications",
+            path: "/fixture/Applications",
+            size: 100,
+            fileCount: 80
+        )
+        let scanTruncatedDirectory = DiskNode(
+            name: "Caches",
+            path: "/fixture/Caches",
+            size: 50,
+            kind: .directory,
+            truncated: true
+        )
         let root = DiskNode(
             name: "fixture",
             path: "/fixture",
-            size: 100,
+            size: 150,
             kind: .directory,
             children: [
-                deepDirectory(name: "Applications", path: "/fixture/Applications", size: 100, fileCount: 80)
+                scannedDirectory,
+                scanTruncatedDirectory
             ]
         )
 
         let layout = try XCTUnwrap(TreemapLayoutEngine.layout(root: root, width: 1000, height: 700))
-        let flattened = layout.flattened
-        let collapsedDirectories = flattened.filter {
-            $0.node.isDirectory && $0.node.truncated && $0.children.isEmpty
-        }
+        let applicationsTile = try XCTUnwrap(
+            layout.children.first { $0.node.path == scannedDirectory.path }
+        )
+        let cachesTile = try XCTUnwrap(
+            layout.children.first { $0.node.path == scanTruncatedDirectory.path }
+        )
 
-        XCTAssertFalse(collapsedDirectories.isEmpty)
-        XCTAssertTrue(collapsedDirectories.allSatisfy { $0.rect.width > 0 && $0.rect.height > 0 })
+        XCTAssertEqual(applicationsTile.node, scannedDirectory)
+        XCTAssertFalse(applicationsTile.node.truncated)
+        XCTAssertTrue(applicationsTile.node.hasChildren)
+        XCTAssertTrue(applicationsTile.children.isEmpty)
+
+        XCTAssertEqual(cachesTile.node, scanTruncatedDirectory)
+        XCTAssertTrue(cachesTile.node.truncated)
+        XCTAssertFalse(cachesTile.node.hasChildren)
+        XCTAssertTrue(cachesTile.children.isEmpty)
+    }
+
+    func testLayoutIsStableLargestFirstAndAreaIsProportional() throws {
+        let root = DiskNode(
+            name: "fixture",
+            path: "/fixture",
+            size: 250,
+            kind: .directory,
+            children: [
+                file(name: "Tiny", size: 10),
+                file(name: "Beta", size: 100),
+                file(name: "Medium", size: 40),
+                file(name: "Alpha", size: 100)
+            ]
+        )
+
+        let layout = try XCTUnwrap(TreemapLayoutEngine.layout(root: root, width: 1000, height: 700))
+        XCTAssertEqual(layout.children.map(\.node.name), ["Alpha", "Beta", "Medium", "Tiny"])
+
+        let areas = Dictionary(uniqueKeysWithValues: layout.children.map {
+            ($0.node.name, $0.rect.width * $0.rect.height)
+        })
+        let alphaArea = try XCTUnwrap(areas["Alpha"])
+        let betaArea = try XCTUnwrap(areas["Beta"])
+        let mediumArea = try XCTUnwrap(areas["Medium"])
+        let tinyArea = try XCTUnwrap(areas["Tiny"])
+
+        XCTAssertGreaterThan(tinyArea, 0)
+        XCTAssertEqual(alphaArea, betaArea, accuracy: 0.001)
+        XCTAssertEqual(alphaArea / mediumArea, 2.5, accuracy: 0.001)
+        XCTAssertEqual(mediumArea / tinyArea, 4, accuracy: 0.001)
+    }
+
+    func testLayoutAggregatesOverflowWithoutRecursingIntoRetainedChildren() throws {
+        let children = (1...90).map { index in
+            directory(
+                name: "Directory-\(index)",
+                path: "/fixture/Directory-\(index)",
+                size: Int64(index)
+            )
+        }
+        let root = DiskNode(
+            name: "fixture",
+            path: "/fixture",
+            size: children.reduce(0) { $0 + $1.size },
+            kind: .directory,
+            children: children
+        )
+
+        let layout = try XCTUnwrap(TreemapLayoutEngine.layout(root: root, width: 1200, height: 800))
+        let overflow = try XCTUnwrap(
+            layout.children.first { $0.node.path.contains("__layout_other_") }
+        )
+
+        XCTAssertEqual(layout.children.count, 81)
+        XCTAssertEqual(overflow.node.size, 55)
+        XCTAssertEqual(overflow.node.name, "(10 smaller items)")
+        XCTAssertTrue(layout.children.allSatisfy { $0.children.isEmpty })
+        XCTAssertTrue(layout.children.allSatisfy { $0.rect.width > 0 && $0.rect.height > 0 })
+    }
+
+    private func file(name: String, size: Int64) -> DiskNode {
+        DiskNode(
+            name: name,
+            path: "/fixture/\(name)",
+            size: size,
+            kind: .file
+        )
     }
 
     private func directory(name: String, path: String, size: Int64) -> DiskNode {

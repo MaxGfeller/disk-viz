@@ -21,92 +21,70 @@ struct TreemapLayoutNode: Identifiable {
 
 enum TreemapLayoutEngine {
     private static let rootChildLimit = 80
-    private static let midChildLimit = 16
-    private static let deepChildLimit = 8
-    private static let maxVisibleDepth = 3
     private static let targetRatio: CGFloat = 1.2
-    private static let paddingTop: CGFloat = 20
-    private static let paddingRight: CGFloat = 2
-    private static let paddingBottom: CGFloat = 2
-    private static let paddingLeft: CGFloat = 2
-    private static let paddingInner: CGFloat = 1
 
     static func layout(root: DiskNode, width: CGFloat, height: CGFloat) -> TreemapLayoutNode? {
         guard width > 0, height > 0 else { return nil }
 
-        let pruned = pruneTree(root, depth: 0)
-        let item = TreemapItem(node: pruned, depth: 0)
-        item.rect = CGRect(x: 0, y: 0, width: width, height: height)
-        layoutChildren(of: item)
+        let children = visibleChildren(of: root).map {
+            TreemapItem(node: $0, depth: 1)
+        }
+        let rootValue = children.isEmpty
+            ? max(Double(root.size), 0)
+            : children.reduce(0) { $0 + $1.value }
+        let rootItem = TreemapItem(
+            node: root,
+            depth: 0,
+            value: rootValue,
+            children: children
+        )
+        rootItem.rect = CGRect(x: 0, y: 0, width: width, height: height)
+        layoutChildren(of: rootItem)
 
-        return materialize(item, maxSiblingValue: item.value)
+        return materialize(rootItem, maxSiblingValue: rootItem.value)
     }
 
-    private static func pruneTree(_ node: DiskNode, depth: Int) -> DiskNode {
-        guard let children = node.children, !children.isEmpty else { return node }
-
-        if depth >= maxVisibleDepth {
-            var collapsed = node
-            collapsed.children = nil
-            collapsed.truncated = true
-            return collapsed
+    private static func visibleChildren(of root: DiskNode) -> [DiskNode] {
+        let sortedChildren = (root.children ?? [])
+            .filter { $0.size > 0 }
+            .sorted(by: compareBySizeDescending)
+        guard sortedChildren.count > rootChildLimit else {
+            return sortedChildren
         }
 
-        let sortedChildren = children.sorted { lhs, rhs in
-            lhs.size == rhs.size
-                ? lhs.name.localizedStandardCompare(rhs.name) == .orderedAscending
-                : lhs.size > rhs.size
-        }
-
-        let limit = childLimit(forDepth: depth)
-        var kept = sortedChildren.prefix(limit).map { child in
-            pruneTree(child, depth: depth + 1)
-        }
-
-        let dropped = sortedChildren.dropFirst(limit)
+        var visible = Array(sortedChildren.prefix(rootChildLimit))
+        let dropped = sortedChildren.dropFirst(rootChildLimit)
         let droppedSize = dropped.reduce(Int64(0)) { $0 + $1.size }
-        if !dropped.isEmpty && droppedSize > 0 {
-            kept.append(
+        if droppedSize > 0 {
+            visible.append(
                 DiskNode(
                     name: "(\(dropped.count) smaller items)",
-                    path: node.path.appendingPathComponent("__layout_other_\(depth)__"),
+                    path: root.path.appendingPathComponent("__layout_other_0__"),
                     size: droppedSize,
                     kind: .file
                 )
             )
         }
 
-        var updated = node
-        updated.children = kept
-        updated.size = kept.reduce(Int64(0)) { $0 + $1.size }
-        return updated
+        return visible.sorted(by: compareBySizeDescending)
     }
 
-    private static func childLimit(forDepth depth: Int) -> Int {
-        switch depth {
-        case 0:
-            rootChildLimit
-        case 1:
-            midChildLimit
-        default:
-            deepChildLimit
+    private static func compareBySizeDescending(_ lhs: DiskNode, _ rhs: DiskNode) -> Bool {
+        if lhs.size != rhs.size {
+            return lhs.size > rhs.size
         }
+
+        let nameOrder = lhs.name.localizedStandardCompare(rhs.name)
+        if nameOrder != .orderedSame {
+            return nameOrder == .orderedAscending
+        }
+
+        return lhs.path < rhs.path
     }
 
     private static func layoutChildren(of item: TreemapItem) {
-        guard let children = item.children, !children.isEmpty else { return }
-
-        let contentRect = CGRect(
-            x: item.rect.minX + paddingLeft,
-            y: item.rect.minY + paddingTop,
-            width: max(0, item.rect.width - paddingLeft - paddingRight),
-            height: max(0, item.rect.height - paddingTop - paddingBottom)
-        )
-
-        guard contentRect.width > 0, contentRect.height > 0 else {
-            children.forEach { $0.rect = .zero }
-            return
-        }
+        let children = item.children
+        guard !children.isEmpty else { return }
 
         let totalValue = children.reduce(0) { $0 + max($1.value, 0) }
         guard totalValue > 0 else {
@@ -114,17 +92,12 @@ enum TreemapLayoutEngine {
             return
         }
 
-        let scale = Double(contentRect.width * contentRect.height) / totalValue
+        let scale = Double(item.rect.width * item.rect.height) / totalValue
         let entries = children.map {
             SquarifyEntry(item: $0, area: CGFloat(max($0.value * scale, 0)))
         }
 
-        squarify(entries, in: contentRect)
-
-        for child in children {
-            child.rect = inset(rect: child.rect, by: paddingInner / 2)
-            layoutChildren(of: child)
-        }
+        squarify(entries, in: item.rect)
     }
 
     private static func squarify(_ entries: [SquarifyEntry], in rect: CGRect) {
@@ -133,7 +106,7 @@ enum TreemapLayoutEngine {
         var row: [SquarifyEntry] = []
 
         while let next = remainingEntries.first {
-            let side = max(1, min(remainingRect.width, remainingRect.height))
+            let side = max(.leastNonzeroMagnitude, min(remainingRect.width, remainingRect.height))
             let candidate = row + [next]
 
             if row.isEmpty || worstAspectRatio(candidate, side: side) <= worstAspectRatio(row, side: side) {
@@ -161,7 +134,9 @@ enum TreemapLayoutEngine {
 
             for (index, entry) in row.enumerated() {
                 let isLast = index == row.count - 1
-                let width = isLast ? rect.maxX - x : entry.area / max(rowHeight, 1)
+                let width = isLast
+                    ? rect.maxX - x
+                    : entry.area / max(rowHeight, .leastNonzeroMagnitude)
                 entry.item.rect = CGRect(
                     x: x,
                     y: rect.minY,
@@ -183,7 +158,9 @@ enum TreemapLayoutEngine {
 
             for (index, entry) in row.enumerated() {
                 let isLast = index == row.count - 1
-                let height = isLast ? rect.maxY - y : entry.area / max(rowWidth, 1)
+                let height = isLast
+                    ? rect.maxY - y
+                    : entry.area / max(rowWidth, .leastNonzeroMagnitude)
                 entry.item.rect = CGRect(
                     x: rect.minX,
                     y: y,
@@ -220,16 +197,11 @@ enum TreemapLayoutEngine {
         )
     }
 
-    private static func inset(rect: CGRect, by amount: CGFloat) -> CGRect {
-        guard rect.width > amount * 2, rect.height > amount * 2 else { return rect }
-        return rect.insetBy(dx: amount, dy: amount)
-    }
-
     private static func materialize(
         _ item: TreemapItem,
         maxSiblingValue: Double
     ) -> TreemapLayoutNode {
-        let childMax = item.children?.map(\.value).max() ?? item.value
+        let childMax = item.children.map(\.value).max() ?? item.value
         return TreemapLayoutNode(
             id: "\(item.node.path)#\(item.depth)",
             node: item.node,
@@ -237,9 +209,9 @@ enum TreemapLayoutEngine {
             depth: item.depth,
             value: item.value,
             maxSiblingValue: max(maxSiblingValue, 1),
-            children: item.children?.map {
+            children: item.children.map {
                 materialize($0, maxSiblingValue: max(childMax, 1))
-            } ?? []
+            }
         )
     }
 }
@@ -249,17 +221,18 @@ private final class TreemapItem {
     var rect: CGRect = .zero
     var depth: Int
     var value: Double
-    var children: [TreemapItem]?
+    var children: [TreemapItem]
 
-    init(node: DiskNode, depth: Int) {
+    init(
+        node: DiskNode,
+        depth: Int,
+        value: Double? = nil,
+        children: [TreemapItem] = []
+    ) {
         self.node = node
         self.depth = depth
-        self.children = node.children?.map { TreemapItem(node: $0, depth: depth + 1) }
-        if let children, !children.isEmpty {
-            self.value = children.reduce(0) { $0 + $1.value }
-        } else {
-            self.value = max(Double(node.size), 0)
-        }
+        self.value = value ?? max(Double(node.size), 0)
+        self.children = children
     }
 }
 
