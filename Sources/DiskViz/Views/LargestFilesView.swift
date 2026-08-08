@@ -59,7 +59,7 @@ struct LargestFilesView: View {
                 Text("Largest files")
                     .font(.headline)
 
-                Text(store.scanning ? "Updating across all folders" : "Across the complete scan")
+                Text(listScopeLabel)
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -79,6 +79,16 @@ struct LargestFilesView: View {
         .padding(.horizontal, 12)
         .frame(height: 56)
         .background(.bar)
+    }
+
+    private var listScopeLabel: String {
+        if store.scanning {
+            return "Updating across all folders"
+        }
+        if store.scanStopped {
+            return "Partial results from stopped scan"
+        }
+        return "Across the complete scan"
     }
 
     private var emptyState: some View {
