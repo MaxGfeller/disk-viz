@@ -162,6 +162,7 @@ final class DiskScannerTests: XCTestCase {
     func testNestedVolumePolicySkipsMountedChildrenButAllowsSelectedRoot() {
         XCTAssertFalse(
             DiskScanner.shouldScanURL(
+                path: "/Volumes/External",
                 isSymbolicLink: false,
                 isVolume: true,
                 isScanRoot: false
@@ -169,6 +170,7 @@ final class DiskScannerTests: XCTestCase {
         )
         XCTAssertTrue(
             DiskScanner.shouldScanURL(
+                path: "/Volumes/External",
                 isSymbolicLink: false,
                 isVolume: true,
                 isScanRoot: true
@@ -176,7 +178,32 @@ final class DiskScannerTests: XCTestCase {
         )
         XCTAssertFalse(
             DiskScanner.shouldScanURL(
+                path: "/tmp/link",
                 isSymbolicLink: true,
+                isVolume: false,
+                isScanRoot: true
+            )
+        )
+        XCTAssertFalse(
+            DiskScanner.shouldScanURL(
+                path: "/.nofollow",
+                isSymbolicLink: false,
+                isVolume: false,
+                isScanRoot: false
+            )
+        )
+        XCTAssertTrue(
+            DiskScanner.shouldScanURL(
+                path: "/tmp/.nofollow",
+                isSymbolicLink: false,
+                isVolume: false,
+                isScanRoot: false
+            )
+        )
+        XCTAssertTrue(
+            DiskScanner.shouldScanURL(
+                path: "/.nofollow",
+                isSymbolicLink: false,
                 isVolume: false,
                 isScanRoot: true
             )

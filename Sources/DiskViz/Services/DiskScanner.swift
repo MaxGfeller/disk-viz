@@ -252,6 +252,7 @@ final class DiskScanner {
                 return nil
             }
             guard Self.shouldScanURL(
+                path: entryURL.standardizedFileURL.path,
                 isSymbolicLink: values.isSymbolicLink,
                 isVolume: values.isVolume,
                 isScanRoot: false
@@ -283,11 +284,18 @@ final class DiskScanner {
     }
 
     static func shouldScanURL(
+        path: String? = nil,
         isSymbolicLink: Bool?,
         isVolume: Bool?,
         isScanRoot: Bool
     ) -> Bool {
         guard isSymbolicLink != true else { return false }
+        // `/.nofollow` is macOS's hidden physical-root mirror. Foundation reports
+        // it as a volume when queried directly, but its prefetched directory value
+        // is false. Traversing it duplicates /Users, /Library, and other firmlinks.
+        if !isScanRoot, path == "/.nofollow" {
+            return false
+        }
         return isScanRoot || isVolume != true
     }
 
