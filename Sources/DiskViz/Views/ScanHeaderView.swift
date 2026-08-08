@@ -2,6 +2,8 @@ import SwiftUI
 
 struct ScanHeaderView: View {
     @ObservedObject var store: DiskUsageStore
+    var cleanupEstimatedBytes: Int64?
+    var onShowCleanup: () -> Void
 
     private var internalSources: [ScanSource] {
         sortedSources(
@@ -34,6 +36,18 @@ struct ScanHeaderView: View {
                     DiskVolumeSummaryView(info: volumeInfo)
                 }
 
+                Button(action: onShowCleanup) {
+                    Label(cleanupButtonTitle, systemImage: "sparkles")
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(store.scanning)
+                .help(
+                    store.scanning
+                        ? "Stop the disk scan before analyzing cleanup opportunities"
+                        : "Review estimated cleanup opportunities; nothing is selected by default"
+                )
+                .accessibilityIdentifier("cleanup-opportunities-button")
+
                 scanControl
             }
 
@@ -50,6 +64,13 @@ struct ScanHeaderView: View {
         .padding(.vertical, 8)
         .frame(minHeight: 72)
         .background(.bar)
+    }
+
+    private var cleanupButtonTitle: String {
+        guard let cleanupEstimatedBytes, cleanupEstimatedBytes > 0 else {
+            return "Clean Up…"
+        }
+        return "Clean Up · ~\(ByteFormatter.string(from: cleanupEstimatedBytes))"
     }
 
     @ViewBuilder

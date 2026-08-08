@@ -2,17 +2,24 @@ import SwiftUI
 
 struct ContentView: View {
     @StateObject private var store: DiskUsageStore
+    @StateObject private var cleanupStore: CleanupStore
     @State private var focusPath: String?
     @State private var selectedNode: DiskNode?
     @State private var pendingTrash: DiskNode?
+    @State private var showingCleanup = false
 
     init(initialScanPath: String = "/") {
         _store = StateObject(wrappedValue: DiskUsageStore(initialScanPath: initialScanPath))
+        _cleanupStore = StateObject(wrappedValue: CleanupStore())
     }
 
     var body: some View {
         VStack(spacing: 0) {
-            ScanHeaderView(store: store)
+            ScanHeaderView(
+                store: store,
+                cleanupEstimatedBytes: cleanupStore.hasAnalyzed ? cleanupStore.estimatedBytes : nil,
+                onShowCleanup: { showingCleanup = true }
+            )
             Divider()
 
             workspace
@@ -36,10 +43,13 @@ struct ContentView: View {
             }
         }
         .onExitCommand(perform: navigateToParent)
+        .sheet(isPresented: $showingCleanup) {
+            CleanupDashboardView(store: cleanupStore)
+        }
         .alert(item: $pendingTrash) { node in
             Alert(
                 title: Text("Move \(node.name) to Trash?"),
-                message: Text("\(ByteFormatter.string(from: node.size))\n\(node.path)\n\nYou can restore this item from Trash."),
+                message: Text("\(ByteFormatter.string(from: node.size))\n\(node.path)\n\nYou can restore this item from Trash. Disk space is reclaimed only after you empty Trash yourself in Finder."),
                 primaryButton: .destructive(Text("Move to Trash")) {
                     store.moveToTrash(node)
                 },

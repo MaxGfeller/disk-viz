@@ -318,7 +318,12 @@ struct CleanupAnalyzer: Sendable {
             .filter {
                 FileManager.default.fileExists(atPath: $0.path)
                     && Self.isSafeCleanupRoot($0, homePath: roots.homePath)
+                    && Self.isDirectoryWithoutFollowingLinks($0)
             }
+        var packagePriority: [String: Int] = [:]
+        for (index, url) in candidateURLs.enumerated() where packagePriority[url.path] == nil {
+            packagePriority[url.path] = index
+        }
         var inaccessibleCount = 0
         var isPartial = false
         let searchRoots = Self.deduplicatedRootPaths(roots.developerSearchPaths)
@@ -326,6 +331,7 @@ struct CleanupAnalyzer: Sendable {
             .filter {
                 FileManager.default.fileExists(atPath: $0.path)
                     && Self.isSafeCleanupRoot($0, homePath: roots.homePath)
+                    && Self.isDirectoryWithoutFollowingLinks($0)
             }
         let discoveredPaths: [String]
 
@@ -359,6 +365,7 @@ struct CleanupAnalyzer: Sendable {
             let url = URL(fileURLWithPath: path, isDirectory: true).standardizedFileURL
             guard searchRoots.contains(where: { Self.isPath(url.path, inside: $0.path) }),
                   Self.isSafeCleanupRoot(url, homePath: roots.homePath),
+                  Self.isDirectoryWithoutFollowingLinks(url),
                   Self.isRegeneratableArtifact(url)
             else {
                 continue
@@ -367,7 +374,17 @@ struct CleanupAnalyzer: Sendable {
         }
 
         candidateURLs = Self.deduplicatedCandidateURLs(candidateURLs)
-        let allocatedSizes = Self.nativeAllocatedSizes(for: candidateURLs)
+        candidateURLs.sort { lhs, rhs in
+            let leftPriority = packagePriority[lhs.path] ?? Int.max
+            let rightPriority = packagePriority[rhs.path] ?? Int.max
+            if leftPriority != rightPriority { return leftPriority < rightPriority }
+            return lhs.path.localizedStandardCompare(rhs.path) == .orderedAscending
+        }
+        let allocatedSizes = Self.nativeAllocatedSizes(
+            for: candidateURLs,
+            maximumDuration: 15,
+            maximumURLCount: 1
+        )
         var candidates: [CleanupCandidate] = candidateURLs.compactMap { url in
             guard let size = allocatedSizes[url.path], size > 0 else {
                 inaccessibleCount += 1
@@ -548,20 +565,32 @@ struct CleanupAnalyzer: Sendable {
         )
     }
 
-    private static func nativeAllocatedSizes(for urls: [URL]) -> [String: Int64] {
+    private static func nativeAllocatedSizes(
+        for urls: [URL],
+        maximumDuration: TimeInterval = 15,
+        maximumURLCount: Int = 512
+    ) -> [String: Int64] {
         guard FileManager.default.isExecutableFile(atPath: "/usr/bin/du") else { return [:] }
 
         var sizes: [String: Int64] = [:]
-        for chunk in nativeCommandChunks(urls) {
+        let deadline = Date().addingTimeInterval(max(0.1, maximumDuration))
+        for chunk in nativeCommandChunks(urls, maximumURLCount: maximumURLCount) {
             guard !Task.isCancelled else { break }
-            sizes.merge(nativeAllocatedSizes(forChunk: chunk)) { _, new in new }
+            let remaining = deadline.timeIntervalSinceNow
+            guard remaining > 0 else { break }
+            sizes.merge(
+                nativeAllocatedSizes(forChunk: chunk, timeout: remaining)
+            ) { _, new in new }
         }
         return sizes
     }
 
-    private static func nativeCommandChunks(_ urls: [URL]) -> [[URL]] {
+    private static func nativeCommandChunks(
+        _ urls: [URL],
+        maximumURLCount: Int
+    ) -> [[URL]] {
         let maximumArgumentBytes = 96 * 1_024
-        let maximumURLCount = 512
+        let maximumURLCount = max(1, maximumURLCount)
         var chunks: [[URL]] = []
         var current: [URL] = []
         var currentBytes = 0
@@ -581,7 +610,10 @@ struct CleanupAnalyzer: Sendable {
         return chunks
     }
 
-    private static func nativeAllocatedSizes(forChunk chunk: [URL]) -> [String: Int64] {
+    private static func nativeAllocatedSizes(
+        forChunk chunk: [URL],
+        timeout: TimeInterval
+    ) -> [String: Int64] {
         guard !chunk.isEmpty else { return [:] }
         var sizes: [String: Int64] = [:]
         let process = Process()
@@ -598,7 +630,7 @@ struct CleanupAnalyzer: Sendable {
 
         do {
             try process.run()
-            let deadline = Date().addingTimeInterval(15)
+            let deadline = Date().addingTimeInterval(max(0.1, timeout))
             while process.isRunning && Date() < deadline && !Task.isCancelled {
                 Thread.sleep(forTimeInterval: 0.02)
             }
@@ -682,6 +714,12 @@ struct CleanupAnalyzer: Sendable {
             guard let path else { return -1 }
             return Darwin.lstat(path, &info)
         }
+    }
+
+    private static func isDirectoryWithoutFollowingLinks(_ url: URL) -> Bool {
+        var info = stat()
+        guard fileStatus(at: url, into: &info) == 0 else { return false }
+        return info.st_mode & mode_t(S_IFMT) == mode_t(S_IFDIR)
     }
 
     private static func sortedCandidates(_ candidates: [CleanupCandidate]) -> [CleanupCandidate] {

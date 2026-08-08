@@ -15,6 +15,14 @@ Other mounted volumes are available as explicit opt-in scan sources.
 - Squarified immediate-child treemap with breadcrumb and Escape-to-parent navigation.
 - Live top-100 largest-files panel, including files deeper than the rendered tree.
 - Finder reveal, path copy, and confirmed, recoverable Move to Trash actions.
+- Preview-first cleanup dashboard with approximate opportunities for old Downloads,
+  old DMG installers, developer caches, Xcode DerivedData, Docker, unavailable
+  simulators, and Trash.
+- Nothing is preselected. Filesystem cleanup moves only explicitly selected items
+  to Trash, and DiskViz never empties Trash for you.
+- Docker cleanup requires a separate permanent-action confirmation, excludes
+  volumes, and leaves Docker disk-image resizing to Docker Desktop because lowering
+  the maximum can destroy Docker data.
 
 ## Run
 

@@ -11,6 +11,8 @@ final class CleanupAnalyzerTests: XCTestCase {
         let nodeProject = projects.appendingPathComponent("web", isDirectory: true)
         let nodeModules = nodeProject.appendingPathComponent("node_modules", isDirectory: true)
         let falseTarget = projects.appendingPathComponent("photos/target", isDirectory: true)
+        let regularTargetProject = projects.appendingPathComponent("not-generated", isDirectory: true)
+        let regularTarget = regularTargetProject.appendingPathComponent("target")
         let npmCache = home.appendingPathComponent(".npm", isDirectory: true)
         let derivedData = home.appendingPathComponent(
             "Library/Developer/Xcode/DerivedData/App-123",
@@ -38,6 +40,8 @@ final class CleanupAnalyzerTests: XCTestCase {
         try write(bytes: 32, to: nodeProject.appendingPathComponent("package.json"))
         try write(bytes: 8_192, to: nodeModules.appendingPathComponent("package.js"))
         try write(bytes: 8_192, to: falseTarget.appendingPathComponent("not-generated.bin"))
+        try write(bytes: 32, to: regularTargetProject.appendingPathComponent("Cargo.toml"))
+        try write(bytes: 8_192, to: regularTarget)
         try write(bytes: 8_192, to: npmCache.appendingPathComponent("cache.bin"))
         try write(bytes: 8_192, to: derivedData.appendingPathComponent("index.bin"))
         try write(bytes: 8_192, to: trash.appendingPathComponent("discarded.bin"))
@@ -58,7 +62,11 @@ final class CleanupAnalyzerTests: XCTestCase {
             roots: roots,
             referenceDate: now,
             suppliedDownloadPaths: [oldDownload.path, recentDownload.path, oldDMG.path],
-            suppliedDeveloperArtifactPaths: [nodeModules.path, falseTarget.path],
+            suppliedDeveloperArtifactPaths: [
+                nodeModules.path,
+                falseTarget.path,
+                regularTarget.path
+            ],
             suppliedDiskImagePaths: [oldDMG.path]
         )
 
@@ -75,6 +83,7 @@ final class CleanupAnalyzerTests: XCTestCase {
         XCTAssertTrue(artifactSuggestion.candidates.contains { $0.path == nodeModules.path })
         XCTAssertTrue(artifactSuggestion.candidates.contains { $0.path == npmCache.path })
         XCTAssertFalse(artifactSuggestion.candidates.contains { $0.path == falseTarget.path })
+        XCTAssertFalse(artifactSuggestion.candidates.contains { $0.path == regularTarget.path })
 
         XCTAssertNotNil(byCategory[.xcodeDerivedData])
         XCTAssertNotNil(byCategory[.trash])
