@@ -196,8 +196,9 @@ private struct TreemapTile: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .position(x: rect.midX, y: rect.midY)
+        .frame(width: rect.width, height: rect.height)
         .contentShape(Rectangle())
+        .offset(x: rect.minX, y: rect.minY)
         .accessibilityLabel(Text(layoutNode.node.name))
         .accessibilityValue(
             Text("\(ByteFormatter.string(from: layoutNode.node.size)), \(layoutNode.node.isDirectory ? "folder" : "file")")
