@@ -3,10 +3,11 @@ import Foundation
 final class DiskScanner {
     private let fileManager = FileManager.default
 
-    // Keep recursive task groups shallow and bounded. Deeper content is still
-    // scanned completely by the iterative tail walker, including progress and
-    // largest-file tracking, and can be rescanned in detail when the user drills in.
-    private let defaultMaxDepth = 3
+    // Keep recursive task groups and the retained visualization tree shallow.
+    // Deeper content is still scanned completely by the iterative tail walker,
+    // including progress and largest-file tracking, and can be rescanned in detail
+    // when the user drills in.
+    private let defaultMaxDepth = 2
     private let childLimitDepth = 2
     private let maxChildren = 30
     private let maxShallowChildren = 500

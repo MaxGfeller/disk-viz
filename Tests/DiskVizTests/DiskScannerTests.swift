@@ -179,11 +179,12 @@ final class DiskScannerTests: XCTestCase {
         let result = try await scanner.scanDirectoryStreaming(path: rootURL.path) { _ in }
         let scannedLevel1 = try XCTUnwrap(result.root.children?.first { $0.name == "Level1" })
         let scannedLevel2 = try XCTUnwrap(scannedLevel1.children?.first { $0.name == "Level2" })
-        let scannedLevel3 = try XCTUnwrap(scannedLevel2.children?.first { $0.name == "Level3" })
 
-        XCTAssertTrue(scannedLevel3.truncated)
-        XCTAssertNil(scannedLevel3.children)
-        XCTAssertGreaterThanOrEqual(scannedLevel3.size, 128 * 1024)
+        XCTAssertFalse(scannedLevel1.truncated)
+        XCTAssertTrue(scannedLevel2.truncated)
+        XCTAssertNil(scannedLevel2.children)
+        XCTAssertGreaterThanOrEqual(scannedLevel2.size, 128 * 1024)
+        XCTAssertNil(TreeOperations.node(in: result.root, atPath: level3.path))
         XCTAssertEqual(
             result.largestFiles.first.map {
                 URL(fileURLWithPath: $0.path).resolvingSymlinksInPath().path
