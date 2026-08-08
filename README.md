@@ -2,18 +2,19 @@
 
 Native macOS disk usage visualization built with Swift and SwiftUI.
 
-The app scans a directory, renders its contents as a squarified treemap, and lets
-you drill into large directories, collapse directories to compare siblings, and
-delete files or folders from a native context menu.
+The app scans the startup disk by default, renders each folder as a proportional
+treemap, and keeps an exact list of the largest files found anywhere in the scan.
+Other mounted volumes are available as explicit opt-in scan sources.
 
 ## Features
 
 - Native SwiftUI macOS app, with no JavaScript, Electron, Vite, or web runtime.
-- Streaming filesystem scan with progress updates while results are discovered.
-- Squarified treemap visualization with file-type colors and size-based shading.
-- Breadcrumb navigation and Escape-to-parent drill-up behavior.
-- Directory collapse state persisted with `UserDefaults`.
-- Native directory picker and native delete confirmation.
+- Startup-disk-first source picker with attached volumes kept opt-in.
+- Volume-safe traversal that avoids external mounts and duplicate macOS APFS roots.
+- Streaming folder, file, byte, and inaccessible-folder counters with Stop support.
+- Squarified immediate-child treemap with breadcrumb and Escape-to-parent navigation.
+- Live top-100 largest-files panel, including files deeper than the rendered tree.
+- Finder reveal, path copy, and confirmed, recoverable Move to Trash actions.
 
 ## Run
 
@@ -38,3 +39,6 @@ Useful variants:
 ./script/build_and_run.sh --logs
 ./script/build_and_run.sh --debug
 ```
+
+DiskViz reports folders macOS does not allow it to read. Grant the built app Full
+Disk Access in System Settings if you want the most complete startup-disk result.
