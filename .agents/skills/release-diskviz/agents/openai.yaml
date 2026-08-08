@@ -1,0 +1,4 @@
+interface:
+  display_name: "Release DiskViz"
+  short_description: "Build, sign, notarize, and publish DiskViz"
+  default_prompt: "Use $release-diskviz to prepare and publish a signed DiskViz release."

@@ -1,5 +1,6 @@
 .build/
 dist/
+/release-artifacts/
 node_modules/
 .DS_Store
 *.xcuserdata/

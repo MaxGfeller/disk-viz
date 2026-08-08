@@ -50,3 +50,50 @@ Useful variants:
 
 DiskViz reports folders macOS does not allow it to read. Grant the built app Full
 Disk Access in System Settings if you want the most complete startup-disk result.
+
+## Releases
+
+GitHub releases are prepared locally as universal macOS apps and signed with
+`Developer ID Application: Valentina Halasi (22YY6H28G3)`. The release pipeline
+requires hardened runtime, a secure timestamp, Apple notarization, a stapled
+ticket, Gatekeeper validation, and matching local/GitHub SHA-256 digests. It has
+no unsigned or unnotarized publication path.
+
+One-time setup stores the notarization credential in Keychain and enables
+immutable GitHub Releases:
+
+```bash
+./script/release.sh setup-notary
+./script/release.sh enable-immutable-releases
+./script/release.sh doctor
+```
+
+`setup-notary` asks for the Apple ID and lets `notarytool` securely prompt for
+the app-specific password. Do not put that password in the repository, shell
+history, environment variables, or command arguments.
+
+Prepare a release without changing GitHub:
+
+```bash
+./script/release.sh prepare 1.0.0
+```
+
+This runs tests, builds `arm64` and `x86_64`, signs the completed app, notarizes
+and staples it, and writes the canonical ZIP, `SHA256SUMS`, and release manifest
+to `release-artifacts/v1.0.0/`.
+
+After reviewing those local artifacts, publish with:
+
+```bash
+./script/release.sh publish 1.0.0
+```
+
+Publication requires two explicit confirmations. It creates the annotated tag
+locally, pushes only that tag, uploads a draft, verifies asset digests, publishes
+the immutable release, and verifies GitHub's signed release attestation.
+
+Verification can be safely resumed without changing a published release:
+
+```bash
+./script/release.sh verify 1.0.0
+```
