@@ -159,6 +159,43 @@ final class DiskScannerTests: XCTestCase {
         )
     }
 
+    func testDefaultScanBoundsRecursiveTreeWhileIndexingDeeperFiles() async throws {
+        let fileManager = FileManager.default
+        let rootURL = fileManager.temporaryDirectory
+            .appendingPathComponent("DiskVizScanner-\(UUID().uuidString)", isDirectory: true)
+        let level1 = rootURL.appendingPathComponent("Level1", isDirectory: true)
+        let level2 = level1.appendingPathComponent("Level2", isDirectory: true)
+        let level3 = level2.appendingPathComponent("Level3", isDirectory: true)
+        let level4 = level3.appendingPathComponent("Level4", isDirectory: true)
+        let deepFile = level4.appendingPathComponent("deep-large.bin")
+
+        try fileManager.createDirectory(at: level4, withIntermediateDirectories: true)
+        try Data(repeating: 3, count: 128 * 1024).write(to: deepFile)
+        defer {
+            try? fileManager.removeItem(at: rootURL)
+        }
+
+        let scanner = DiskScanner(snapshotInterval: 0)
+        let result = try await scanner.scanDirectoryStreaming(path: rootURL.path) { _ in }
+        let scannedLevel1 = try XCTUnwrap(result.root.children?.first { $0.name == "Level1" })
+        let scannedLevel2 = try XCTUnwrap(scannedLevel1.children?.first { $0.name == "Level2" })
+        let scannedLevel3 = try XCTUnwrap(scannedLevel2.children?.first { $0.name == "Level3" })
+
+        XCTAssertTrue(scannedLevel3.truncated)
+        XCTAssertNil(scannedLevel3.children)
+        XCTAssertGreaterThanOrEqual(scannedLevel3.size, 128 * 1024)
+        XCTAssertEqual(
+            result.largestFiles.first.map {
+                URL(fileURLWithPath: $0.path).resolvingSymlinksInPath().path
+            },
+            deepFile.resolvingSymlinksInPath().path
+        )
+        XCTAssertEqual(result.progress.dirsFound, 5)
+        XCTAssertEqual(result.progress.dirsCompleted, 5)
+        XCTAssertEqual(result.progress.filesFound, 1)
+        XCTAssertGreaterThanOrEqual(result.progress.bytesFound, 128 * 1024)
+    }
+
     func testNestedVolumePolicySkipsMountedChildrenButAllowsSelectedRoot() {
         XCTAssertFalse(
             DiskScanner.shouldScanURL(

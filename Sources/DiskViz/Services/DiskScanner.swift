@@ -3,7 +3,10 @@ import Foundation
 final class DiskScanner {
     private let fileManager = FileManager.default
 
-    private let defaultMaxDepth = 8
+    // Keep recursive task groups shallow and bounded. Deeper content is still
+    // scanned completely by the iterative tail walker, including progress and
+    // largest-file tracking, and can be rescanned in detail when the user drills in.
+    private let defaultMaxDepth = 3
     private let childLimitDepth = 2
     private let maxChildren = 30
     private let maxShallowChildren = 500
@@ -76,7 +79,11 @@ final class DiskScanner {
         try Task.checkCancellation()
 
         if depth >= maxDepth {
-            let size = try await nativeDirectorySize(path: node.path, state: state)
+            let size = try await nativeDirectorySize(
+                path: node.path,
+                updating: node,
+                state: state
+            )
             state.update { _ in
                 node.truncated = true
                 node.size = size
@@ -299,7 +306,11 @@ final class DiskScanner {
         return isScanRoot || isVolume != true
     }
 
-    private func nativeDirectorySize(path: String, state: ScanRunState) async throws -> Int64 {
+    private func nativeDirectorySize(
+        path: String,
+        updating node: MutableDiskNode,
+        state: ScanRunState
+    ) async throws -> Int64 {
         var totalSize: Int64 = 0
         var pendingDirectories = [path]
 
@@ -331,6 +342,7 @@ final class DiskScanner {
             totalSize += files.reduce(Int64(0)) { $0 + $1.fileSize }
 
             state.update { progress in
+                node.size = totalSize
                 progress.dirsFound += directories.count
                 progress.dirsCompleted += 1
             }
