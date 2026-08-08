@@ -49,7 +49,7 @@ final class CleanupInspectorTests: XCTestCase {
             if arguments == ["simctl", "list", "devices", "unavailable", "-j"] {
                 return commandResult(arguments: arguments, stdout: listJSON)
             }
-            if arguments.first == "-sk" {
+            if arguments.first == "-skx" {
                 return commandResult(arguments: arguments, stdout: "100\tA\n250\tB\n")
             }
             return commandResult(arguments: arguments)

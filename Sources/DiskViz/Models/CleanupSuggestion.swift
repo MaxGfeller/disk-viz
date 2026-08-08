@@ -21,8 +21,39 @@ struct CleanupCandidate: Identifiable, Hashable, Sendable {
 
     var name: String
     var path: String
+    var canonicalPath: String
     var allocatedBytes: Int64
     var modifiedAt: Date?
+    var fileResourceIdentifier: String?
+    var volumeIdentifier: String?
+
+    init(
+        name: String,
+        path: String,
+        allocatedBytes: Int64,
+        modifiedAt: Date?,
+        canonicalPath: String? = nil,
+        fileResourceIdentifier: String? = nil,
+        volumeIdentifier: String? = nil
+    ) {
+        let url = URL(fileURLWithPath: path).standardizedFileURL
+        let keys: Set<URLResourceKey> = [
+            .fileResourceIdentifierKey,
+            .volumeIdentifierKey
+        ]
+        let values = try? url.resourceValues(forKeys: keys)
+
+        self.name = name
+        self.path = url.path
+        self.canonicalPath = canonicalPath
+            ?? url.resolvingSymlinksInPath().standardizedFileURL.path
+        self.allocatedBytes = max(0, allocatedBytes)
+        self.modifiedAt = modifiedAt
+        self.fileResourceIdentifier = fileResourceIdentifier
+            ?? values?.fileResourceIdentifier.map { String(describing: $0) }
+        self.volumeIdentifier = volumeIdentifier
+            ?? values?.volumeIdentifier.map { String(describing: $0) }
+    }
 }
 
 struct CleanupSuggestion: Identifiable, Hashable, Sendable {
@@ -62,7 +93,7 @@ struct CleanupSuggestion: Identifiable, Hashable, Sendable {
 }
 
 enum CleanupPendingActionKind: Hashable, Sendable {
-    case moveToTrash(paths: [String])
+    case moveToTrash(candidates: [CleanupCandidate])
     case pruneDocker
     case deleteUnavailableSimulators
 }

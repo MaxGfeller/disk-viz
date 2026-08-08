@@ -3,6 +3,7 @@ import Foundation
 struct SimulatorUsageEstimate: Equatable, Sendable {
     var unavailableDeviceCount: Int
     var allocatedBytes: Int64
+    var isSizePartial = false
 }
 
 protocol SimulatorInspecting: Sendable {
@@ -55,21 +56,30 @@ struct SimulatorInspector: SimulatorInspecting {
         guard !paths.isEmpty else {
             return SimulatorUsageEstimate(
                 unavailableDeviceCount: devices.count,
-                allocatedBytes: 0
+                allocatedBytes: 0,
+                isSizePartial: false
             )
         }
 
         let sizeResult = try await runner.run(
             executable: duPath,
-            arguments: ["-sk"] + paths,
+            arguments: ["-skx"] + paths,
             timeout: 60,
             outputLimit: 4 * 1024 * 1024
         )
+        guard !sizeResult.timedOut, sizeResult.exitCode == 0 else {
+            return SimulatorUsageEstimate(
+                unavailableDeviceCount: devices.count,
+                allocatedBytes: 0,
+                isSizePartial: true
+            )
+        }
         let allocatedBytes = Self.parseDiskUsageKilobytes(sizeResult.stdoutString) * 1_024
 
         return SimulatorUsageEstimate(
             unavailableDeviceCount: devices.count,
-            allocatedBytes: allocatedBytes
+            allocatedBytes: allocatedBytes,
+            isSizePartial: false
         )
     }
 

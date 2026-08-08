@@ -1,4 +1,5 @@
 import Foundation
+import Darwin
 
 struct CommandResult: Equatable, Sendable {
     var executable: String
@@ -33,7 +34,7 @@ struct ProcessCommandRunner: CommandRunning {
         timeout: TimeInterval = 15,
         outputLimit: Int = 4 * 1024 * 1024
     ) async throws -> CommandResult {
-        try await Task.detached(priority: .utility) {
+        let worker = Task.detached(priority: .utility) {
             let process = Process()
             let standardOutput = Pipe()
             let standardError = Pipe()
@@ -59,24 +60,38 @@ struct ProcessCommandRunner: CommandRunning {
 
             try process.run()
 
-            let deadline = Date().addingTimeInterval(max(0.1, timeout))
-            while process.isRunning && Date() < deadline {
-                if Task.isCancelled {
-                    process.terminate()
-                    process.waitUntilExit()
-                    throw CancellationError()
+            func stopProcess() async {
+                guard process.isRunning else { return }
+                process.terminate()
+                let gracefulDeadline = Date().addingTimeInterval(0.4)
+                while process.isRunning && Date() < gracefulDeadline {
+                    try? await Task.sleep(nanoseconds: 20_000_000)
                 }
-                try await Task.sleep(nanoseconds: 20_000_000)
+                if process.isRunning {
+                    kill(process.processIdentifier, SIGKILL)
+                    let killDeadline = Date().addingTimeInterval(0.4)
+                    while process.isRunning && Date() < killDeadline {
+                        try? await Task.sleep(nanoseconds: 20_000_000)
+                    }
+                }
+            }
+
+            let deadline = Date().addingTimeInterval(max(0.1, timeout))
+            do {
+                while process.isRunning && Date() < deadline {
+                    try Task.checkCancellation()
+                    try await Task.sleep(nanoseconds: 20_000_000)
+                }
+            } catch {
+                await stopProcess()
+                throw error
             }
 
             let timedOut = process.isRunning
             if timedOut {
-                process.terminate()
+                await stopProcess()
             }
-            process.waitUntilExit()
-
-            output.append(standardOutput.fileHandleForReading.availableData)
-            errorOutput.append(standardError.fileHandleForReading.availableData)
+            try? await Task.sleep(nanoseconds: 20_000_000)
 
             return CommandResult(
                 executable: executable,
@@ -86,7 +101,13 @@ struct ProcessCommandRunner: CommandRunning {
                 stderr: errorOutput.data,
                 timedOut: timedOut
             )
-        }.value
+        }
+
+        return try await withTaskCancellationHandler {
+            try await worker.value
+        } onCancel: {
+            worker.cancel()
+        }
     }
 }
 
