@@ -26,6 +26,15 @@ struct ContentView: View {
         .onReceive(store.$root.compactMap { $0 }) { root in
             reconcileNavigation(with: root)
         }
+        .onChange(of: store.scanning) { _, scanning in
+            if scanning {
+                focusPath = nil
+                selectedNode = nil
+                pendingTrash = nil
+            } else if let root = store.root {
+                reconcileNavigation(with: root)
+            }
+        }
         .onExitCommand(perform: navigateToParent)
         .alert(item: $pendingTrash) { node in
             Alert(
@@ -90,6 +99,14 @@ struct ContentView: View {
         if !TreeOperations.isPath(focusPath, equalToOrDescendantOf: root.path) {
             self.focusPath = root.path
             selectedNode = nil
+            return
+        }
+
+        if TreeOperations.node(in: root, atPath: focusPath) == nil {
+            if !store.scanning {
+                self.focusPath = root.path
+                selectedNode = nil
+            }
             return
         }
 

@@ -24,6 +24,7 @@ struct ScanHeaderView: View {
                     externalSources: externalSources,
                     disabled: store.scanning,
                     onSelect: store.selectAndScan,
+                    onRefreshVolumes: store.refreshScanSources,
                     onChooseFolder: store.chooseDirectoryAndScan
                 )
 
@@ -95,6 +96,7 @@ private struct ScanSourceMenu: View {
     var externalSources: [ScanSource]
     var disabled: Bool
     var onSelect: (ScanSource) -> Void
+    var onRefreshVolumes: () -> Void
     var onChooseFolder: () -> Void
 
     var body: some View {
@@ -122,6 +124,10 @@ private struct ScanSourceMenu: View {
             }
 
             Divider()
+
+            Button(action: onRefreshVolumes) {
+                Label("Refresh Volumes", systemImage: "arrow.clockwise")
+            }
 
             Button(action: onChooseFolder) {
                 Label("Choose Folder…", systemImage: "folder")
