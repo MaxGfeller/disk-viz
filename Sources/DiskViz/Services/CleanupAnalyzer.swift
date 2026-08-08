@@ -41,6 +41,8 @@ struct CleanupAnalyzer: Sendable {
     private let referenceDate: Date
     private let oldItemAge: TimeInterval
     private let commandRunner: any CommandRunning
+    private let suppliedDownloadPaths: [String]?
+    private let suppliedDeveloperArtifactPaths: [String]?
     private let suppliedDiskImagePaths: [String]?
 
     init(
@@ -48,12 +50,16 @@ struct CleanupAnalyzer: Sendable {
         referenceDate: Date = Date(),
         oldItemAge: TimeInterval = 90 * 24 * 60 * 60,
         commandRunner: any CommandRunning = ProcessCommandRunner(),
+        suppliedDownloadPaths: [String]? = nil,
+        suppliedDeveloperArtifactPaths: [String]? = nil,
         suppliedDiskImagePaths: [String]? = nil
     ) {
         self.roots = roots
         self.referenceDate = referenceDate
         self.oldItemAge = oldItemAge
         self.commandRunner = commandRunner
+        self.suppliedDownloadPaths = suppliedDownloadPaths
+        self.suppliedDeveloperArtifactPaths = suppliedDeveloperArtifactPaths
         self.suppliedDiskImagePaths = suppliedDiskImagePaths
     }
 
@@ -62,14 +68,22 @@ struct CleanupAnalyzer: Sendable {
         let cutoff = referenceDate.addingTimeInterval(-oldItemAge)
 
         let filesystemWorker = Task.detached(priority: .utility) {
-            Self.analyzeFilesystem(roots: roots, cutoff: cutoff)
+            Self.analyzeFilesystem(roots: roots)
         }
 
         return await withTaskCancellationHandler {
             async let filesystemSuggestions = filesystemWorker.value
+            async let downloadSuggestion = analyzeOldDownloads(cutoff: cutoff)
+            async let artifactSuggestion = analyzeDeveloperArtifacts()
             async let diskImageSuggestion = analyzeDiskImages(cutoff: cutoff)
 
             var suggestions = await filesystemSuggestions
+            if let downloadSuggestion = await downloadSuggestion {
+                suggestions.append(downloadSuggestion)
+            }
+            if let artifactSuggestion = await artifactSuggestion {
+                suggestions.append(artifactSuggestion)
+            }
             if let diskImageSuggestion = await diskImageSuggestion,
                let nonoverlapping = Self.removingDiskImageOverlaps(
                 diskImageSuggestion,
@@ -160,25 +174,10 @@ struct CleanupAnalyzer: Sendable {
         )
     }
 
-    private static func analyzeFilesystem(
-        roots: CleanupRoots,
-        cutoff: Date
-    ) -> [CleanupSuggestion] {
+    private static func analyzeFilesystem(roots: CleanupRoots) -> [CleanupSuggestion] {
         guard !Task.isCancelled else { return [] }
         var suggestions: [CleanupSuggestion] = []
 
-        if let downloads = analyzeOldDownloads(
-            path: roots.downloadsPath,
-            homePath: roots.homePath,
-            cutoff: cutoff
-        ) {
-            suggestions.append(downloads)
-        }
-        guard !Task.isCancelled else { return [] }
-        if let artifacts = analyzeDeveloperArtifacts(roots: roots) {
-            suggestions.append(artifacts)
-        }
-        guard !Task.isCancelled else { return [] }
         if let derivedData = analyzeDerivedData(
             path: roots.xcodeDerivedDataPath,
             homePath: roots.homePath
@@ -193,44 +192,53 @@ struct CleanupAnalyzer: Sendable {
         return suggestions
     }
 
-    private static func analyzeOldDownloads(
-        path: String,
-        homePath: String,
-        cutoff: Date
-    ) -> CleanupSuggestion? {
-        let fileManager = FileManager.default
-        let root = URL(fileURLWithPath: path, isDirectory: true)
-        guard isSafeCleanupRoot(root, homePath: homePath) else { return nil }
+    private func analyzeOldDownloads(cutoff: Date) async -> CleanupSuggestion? {
+        let root = URL(fileURLWithPath: roots.downloadsPath, isDirectory: true)
+        guard Self.isSafeCleanupRoot(root, homePath: roots.homePath) else { return nil }
         var rootStat = stat()
-        guard lstat(root.path, &rootStat) == 0 else { return nil }
-        let names: [String]
+        guard Self.fileStatus(at: root, into: &rootStat) == 0 else { return nil }
+        let paths: [String]
+        var isPartial = false
 
-        do {
-            names = try fileManager.contentsOfDirectory(atPath: root.path)
-        } catch {
-            guard fileManager.fileExists(atPath: path) else { return nil }
-            return CleanupSuggestion(
-                category: .oldDownloads,
-                title: "Old Downloads",
-                detail: "DiskViz could not read Downloads. Review macOS Files & Folders access.",
-                estimatedBytes: 0,
-                inaccessibleCount: 1,
-                isPartial: true
-            )
+        if let suppliedDownloadPaths {
+            paths = suppliedDownloadPaths
+        } else {
+            do {
+                let result = try await commandRunner.run(
+                    executable: "/usr/bin/find",
+                    arguments: [
+                        "-x",
+                        root.path,
+                        "-mindepth", "1",
+                        "-maxdepth", "1",
+                        "-print0"
+                    ],
+                    timeout: 5,
+                    outputLimit: 8 * 1024 * 1024
+                )
+                isPartial = result.timedOut || result.exitCode != 0
+                paths = Self.nullSeparatedPaths(result.stdout)
+            } catch {
+                paths = []
+                isPartial = true
+            }
         }
 
         var inaccessibleCount = 0
         var eligibleEntries: [TopLevelDownloadEntry] = []
-        eligibleEntries.reserveCapacity(names.count)
+        eligibleEntries.reserveCapacity(paths.count)
 
-        for name in names {
+        for path in Set(paths) {
             guard !Task.isCancelled else { break }
-            let url = root.appendingPathComponent(name).standardizedFileURL
+            let url = URL(fileURLWithPath: path).standardizedFileURL
+            guard url.deletingLastPathComponent().path == root.standardizedFileURL.path else {
+                continue
+            }
             if url.pathExtension.lowercased() == "dmg" {
                 continue
             }
             var itemStat = stat()
-            guard lstat(url.path, &itemStat) == 0 else {
+            guard Self.fileStatus(at: url, into: &itemStat) == 0 else {
                 inaccessibleCount += 1
                 continue
             }
@@ -260,7 +268,7 @@ struct CleanupAnalyzer: Sendable {
             )
         }
 
-        let directorySizes = nativeAllocatedSizes(
+        let directorySizes = Self.nativeAllocatedSizes(
             for: eligibleEntries.compactMap { entry in
                 entry.directAllocatedBytes == nil ? entry.url : nil
             }
@@ -280,7 +288,7 @@ struct CleanupAnalyzer: Sendable {
             return lhs.entry.url.path.localizedStandardCompare(rhs.entry.url.path) == .orderedAscending
         }
         let totalBytes = measuredEntries.reduce(Int64(0)) { $0 + $1.size }
-        guard totalBytes > 0 || inaccessibleCount > 0 else { return nil }
+        guard totalBytes > 0 || inaccessibleCount > 0 || isPartial else { return nil }
         let candidates = measuredEntries.prefix(500).map { item in
             CleanupCandidate(
                 name: item.entry.url.lastPathComponent,
@@ -293,68 +301,73 @@ struct CleanupAnalyzer: Sendable {
         return CleanupSuggestion(
             category: .oldDownloads,
             title: "Old Downloads",
-            detail: "Top-level items last changed at least 90 days ago. Review folders before selecting them.",
+            detail: isPartial
+                ? "Downloads took too long to enumerate, so this is a partial estimate. Review macOS Files & Folders access and try again."
+                : "Top-level items last changed at least 90 days ago. Review folders before selecting them.",
             estimatedBytes: totalBytes,
             totalCandidateCount: measuredEntries.count,
             candidates: candidates,
             inaccessibleCount: inaccessibleCount,
-            isPartial: inaccessibleCount > 0
+            isPartial: isPartial || inaccessibleCount > 0
         )
     }
 
-    private static func analyzeDeveloperArtifacts(roots: CleanupRoots) -> CleanupSuggestion? {
+    private func analyzeDeveloperArtifacts() async -> CleanupSuggestion? {
         var candidateURLs = roots.packageCachePaths
             .map { URL(fileURLWithPath: $0, isDirectory: true).standardizedFileURL }
             .filter {
                 FileManager.default.fileExists(atPath: $0.path)
-                    && isSafeCleanupRoot($0, homePath: roots.homePath)
+                    && Self.isSafeCleanupRoot($0, homePath: roots.homePath)
             }
         var inaccessibleCount = 0
-
-        for searchPath in deduplicatedRootPaths(roots.developerSearchPaths) {
-            guard !Task.isCancelled else { break }
-            let searchRoot = URL(fileURLWithPath: searchPath, isDirectory: true)
-            guard FileManager.default.fileExists(atPath: searchRoot.path),
-                  isSafeCleanupRoot(searchRoot, homePath: roots.homePath)
-            else { continue }
-
-            var enumerationErrors = 0
-            guard let enumerator = FileManager.default.enumerator(
-                at: searchRoot,
-                includingPropertiesForKeys: Array(resourceKeys),
-                options: [.skipsPackageDescendants],
-                errorHandler: { _, _ in
-                    enumerationErrors += 1
-                    return true
-                }
-            ) else {
-                inaccessibleCount += 1
-                continue
+        var isPartial = false
+        let searchRoots = Self.deduplicatedRootPaths(roots.developerSearchPaths)
+            .map { URL(fileURLWithPath: $0, isDirectory: true).standardizedFileURL }
+            .filter {
+                FileManager.default.fileExists(atPath: $0.path)
+                    && Self.isSafeCleanupRoot($0, homePath: roots.homePath)
             }
+        let discoveredPaths: [String]
 
-            while !Task.isCancelled, let url = enumerator.nextObject() as? URL {
-                guard let values = try? url.resourceValues(forKeys: resourceKeys) else {
-                    inaccessibleCount += 1
-                    continue
-                }
-                if values.isSymbolicLink == true || values.isVolume == true {
-                    if values.isDirectory == true { enumerator.skipDescendants() }
-                    continue
-                }
-                guard values.isDirectory == true else { continue }
-
-                if isRegeneratableArtifact(url) {
-                    candidateURLs.append(url.standardizedFileURL)
-                    enumerator.skipDescendants()
-                } else if url.lastPathComponent == ".git" {
-                    enumerator.skipDescendants()
-                }
+        if let suppliedDeveloperArtifactPaths {
+            discoveredPaths = suppliedDeveloperArtifactPaths
+        } else if searchRoots.isEmpty {
+            discoveredPaths = []
+        } else {
+            do {
+                let result = try await commandRunner.run(
+                    executable: "/usr/bin/mdfind",
+                    arguments: [
+                        "-0",
+                        "-onlyin",
+                        roots.homePath,
+                        Self.developerArtifactMetadataQuery
+                    ],
+                    timeout: 8,
+                    outputLimit: 8 * 1024 * 1024
+                )
+                isPartial = result.timedOut || result.exitCode != 0
+                discoveredPaths = Self.nullSeparatedPaths(result.stdout)
+            } catch {
+                discoveredPaths = []
+                isPartial = true
             }
-            inaccessibleCount += enumerationErrors
         }
 
-        candidateURLs = deduplicatedCandidateURLs(candidateURLs)
-        let allocatedSizes = nativeAllocatedSizes(for: candidateURLs)
+        for path in Set(discoveredPaths) {
+            guard !Task.isCancelled else { break }
+            let url = URL(fileURLWithPath: path, isDirectory: true).standardizedFileURL
+            guard searchRoots.contains(where: { Self.isPath(url.path, inside: $0.path) }),
+                  Self.isSafeCleanupRoot(url, homePath: roots.homePath),
+                  Self.isRegeneratableArtifact(url)
+            else {
+                continue
+            }
+            candidateURLs.append(url)
+        }
+
+        candidateURLs = Self.deduplicatedCandidateURLs(candidateURLs)
+        let allocatedSizes = Self.nativeAllocatedSizes(for: candidateURLs)
         var candidates: [CleanupCandidate] = candidateURLs.compactMap { url in
             guard let size = allocatedSizes[url.path], size > 0 else {
                 inaccessibleCount += 1
@@ -363,16 +376,16 @@ struct CleanupAnalyzer: Sendable {
             let modifiedAt = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?
                 .contentModificationDate
             return CleanupCandidate(
-                name: displayArtifactName(url),
+                name: Self.displayArtifactName(url),
                 path: url.path,
                 allocatedBytes: size,
                 modifiedAt: modifiedAt
             )
         }
 
-        candidates = sortedCandidates(candidates)
+        candidates = Self.sortedCandidates(candidates)
         let totalBytes = candidates.reduce(Int64(0)) { $0 + $1.allocatedBytes }
-        guard totalBytes > 0 || inaccessibleCount > 0 else { return nil }
+        guard totalBytes > 0 || inaccessibleCount > 0 || isPartial else { return nil }
 
         return CleanupSuggestion(
             category: .developerArtifacts,
@@ -382,8 +395,22 @@ struct CleanupAnalyzer: Sendable {
             totalCandidateCount: candidates.count,
             candidates: Array(candidates.prefix(500)),
             inaccessibleCount: inaccessibleCount,
-            isPartial: inaccessibleCount > 0
+            isPartial: isPartial || inaccessibleCount > 0
         )
+    }
+
+    private static var developerArtifactMetadataQuery: String {
+        [
+            "node_modules",
+            ".build",
+            "target",
+            ".next",
+            ".nuxt",
+            ".turbo",
+            ".parcel-cache"
+        ]
+        .map { "kMDItemFSName == \"\($0)\"cd" }
+        .joined(separator: " || ")
     }
 
     private static func analyzeDerivedData(path: String, homePath: String) -> CleanupSuggestion? {
@@ -571,7 +598,7 @@ struct CleanupAnalyzer: Sendable {
 
         do {
             try process.run()
-            let deadline = Date().addingTimeInterval(60)
+            let deadline = Date().addingTimeInterval(15)
             while process.isRunning && Date() < deadline && !Task.isCancelled {
                 Thread.sleep(forTimeInterval: 0.02)
             }
@@ -579,16 +606,17 @@ struct CleanupAnalyzer: Sendable {
             if interrupted {
                 stop(process)
             }
-            guard !interrupted,
-                  !Task.isCancelled,
-                  process.terminationStatus == 0
-            else {
+            guard !Task.isCancelled else {
                 output.fileHandleForReading.readabilityHandler = nil
                 return [:]
             }
             Thread.sleep(forTimeInterval: 0.02)
             output.fileHandleForReading.readabilityHandler = nil
             let data = buffer.data
+
+            // `du` writes one complete line after each input. Preserve completed
+            // measurements when the bounded pass times out; missing paths make the
+            // category visibly partial instead of blocking the entire dashboard.
 
             for line in String(decoding: data, as: UTF8.self)
                 .split(whereSeparator: { $0.isNewline }) {
@@ -643,8 +671,16 @@ struct CleanupAnalyzer: Sendable {
     }
 
     private static func nullSeparatedPaths(_ data: Data) -> [String] {
-        data.split(separator: 0).compactMap { bytes in
+        guard let lastTerminator = data.lastIndex(of: 0) else { return [] }
+        return data[...lastTerminator].split(separator: 0).compactMap { bytes in
             String(data: Data(bytes), encoding: .utf8)
+        }
+    }
+
+    private static func fileStatus(at url: URL, into info: inout stat) -> Int32 {
+        url.withUnsafeFileSystemRepresentation { path in
+            guard let path else { return -1 }
+            return Darwin.lstat(path, &info)
         }
     }
 

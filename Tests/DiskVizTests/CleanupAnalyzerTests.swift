@@ -57,6 +57,8 @@ final class CleanupAnalyzerTests: XCTestCase {
         let analyzer = CleanupAnalyzer(
             roots: roots,
             referenceDate: now,
+            suppliedDownloadPaths: [oldDownload.path, recentDownload.path, oldDMG.path],
+            suppliedDeveloperArtifactPaths: [nodeModules.path, falseTarget.path],
             suppliedDiskImagePaths: [oldDMG.path]
         )
 
@@ -78,6 +80,46 @@ final class CleanupAnalyzerTests: XCTestCase {
         XCTAssertNotNil(byCategory[.trash])
     }
 
+    func testSlowDownloadsEnumerationIsBoundedAndReportedAsPartial() async throws {
+        let fileManager = FileManager.default
+        let home = fileManager.temporaryDirectory
+            .appendingPathComponent("DiskVizCleanupTimeout-\(UUID().uuidString)", isDirectory: true)
+        let downloads = home.appendingPathComponent("Downloads", isDirectory: true)
+        try fileManager.createDirectory(at: downloads, withIntermediateDirectories: true)
+        defer { try? fileManager.removeItem(at: home) }
+
+        let runner = TimedOutFindRunner()
+        let roots = CleanupRoots(
+            homePath: home.path,
+            downloadsPath: downloads.path,
+            developerSearchPaths: [],
+            packageCachePaths: [],
+            xcodeDerivedDataPath: home.appendingPathComponent("DerivedData").path,
+            trashPath: home.appendingPathComponent(".Trash").path
+        )
+        let analyzer = CleanupAnalyzer(
+            roots: roots,
+            commandRunner: runner,
+            suppliedDiskImagePaths: []
+        )
+
+        let suggestions = await analyzer.analyze()
+        let downloadsSuggestion = try XCTUnwrap(
+            suggestions.first(where: { $0.category == .oldDownloads })
+        )
+        XCTAssertTrue(downloadsSuggestion.isPartial)
+        XCTAssertEqual(downloadsSuggestion.estimatedBytes, 0)
+        XCTAssertTrue(downloadsSuggestion.candidates.isEmpty)
+        let calls = await runner.recordedCalls()
+        XCTAssertEqual(calls, [[
+            "-x",
+            downloads.path,
+            "-mindepth", "1",
+            "-maxdepth", "1",
+            "-print0"
+        ]])
+    }
+
     private func write(bytes: Int, to url: URL) throws {
         try FileManager.default.createDirectory(
             at: url.deletingLastPathComponent(),
@@ -91,5 +133,30 @@ final class CleanupAnalyzerTests: XCTestCase {
             [.modificationDate: date],
             ofItemAtPath: url.path
         )
+    }
+}
+
+private actor TimedOutFindRunner: CommandRunning {
+    private var calls: [[String]] = []
+
+    func run(
+        executable: String,
+        arguments: [String],
+        timeout: TimeInterval,
+        outputLimit: Int
+    ) async throws -> CommandResult {
+        calls.append(arguments)
+        return CommandResult(
+            executable: executable,
+            arguments: arguments,
+            exitCode: -1,
+            stdout: Data(),
+            stderr: Data(),
+            timedOut: true
+        )
+    }
+
+    func recordedCalls() -> [[String]] {
+        calls
     }
 }
