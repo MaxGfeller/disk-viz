@@ -35,7 +35,10 @@ struct TreemapView: View {
                         TreemapBackdrop()
 
                         if layout.children.isEmpty {
-                            EmptyDirectoryView(node: currentNode, isScanning: store.scanning)
+                            EmptyDirectoryView(
+                                node: currentNode,
+                                isScanning: store.sourceScanning || store.isExpanding(currentNode.path)
+                            )
                         } else {
                             ForEach(layout.children) { child in
                                 TreemapTile(
@@ -77,6 +80,7 @@ struct TreemapView: View {
             .buttonStyle(.borderless)
             .disabled(navigationPath.count <= 1)
             .help("Go to Parent Folder (Esc)")
+            .accessibilityIdentifier("treemap-back-button")
 
             BreadcrumbView(path: navigationPath) { index in
                 focusPath = navigationPath[index].path
@@ -88,6 +92,9 @@ struct TreemapView: View {
             if let currentNode {
                 Text("\(currentNode.children?.count ?? 0) items")
                     .foregroundStyle(.tertiary)
+                    .accessibilityLabel("Current folder")
+                    .accessibilityValue(currentNode.path)
+                    .accessibilityIdentifier("treemap-current-path")
                 Text(ByteFormatter.string(from: currentNode.size))
                     .foregroundStyle(.secondary)
                     .monospacedDigit()
@@ -101,14 +108,20 @@ struct TreemapView: View {
 
     private func activate(_ node: DiskNode) {
         guard !isSyntheticDiskNode(node) else { return }
-        selectedNode = node
+        guard
+            let root = store.root,
+            let currentNode = TreeOperations.node(in: root, atPath: node.path)
+        else {
+            return
+        }
+        selectedNode = currentNode
 
-        guard node.isDirectory else { return }
-        if node.hasChildren {
-            focusPath = node.path
-            selectedNode = nil
-        } else if node.truncated && !store.scanning {
-            store.scan(node.path)
+        guard currentNode.isDirectory else { return }
+        focusPath = currentNode.path
+        selectedNode = nil
+
+        if store.needsExpansion(for: currentNode) {
+            store.expand(currentNode.path)
         }
     }
 
@@ -200,6 +213,7 @@ private struct TreemapTile: View {
         .contentShape(Rectangle())
         .offset(x: rect.minX, y: rect.minY)
         .accessibilityLabel(Text(layoutNode.node.name))
+        .accessibilityIdentifier("treemap-node-\(layoutNode.node.path)")
         .accessibilityValue(
             Text("\(ByteFormatter.string(from: layoutNode.node.size)), \(layoutNode.node.isDirectory ? "folder" : "file")")
         )
@@ -225,8 +239,8 @@ private struct TreemapTile: View {
         if node.isDirectory && node.hasChildren {
             return "Open this folder in the treemap."
         }
-        if node.isDirectory && node.truncated && !store.scanning {
-            return "Scan this folder in more detail."
+        if node.isDirectory && store.needsExpansion(for: node) {
+            return "Open and index this folder in more detail."
         }
         return node.isDirectory ? "Select this folder." : "Select this file."
     }

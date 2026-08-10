@@ -7,6 +7,7 @@ struct ContentView: View {
     @State private var selectedNode: DiskNode?
     @State private var pendingTrash: DiskNode?
     @State private var showingCleanup = false
+    @State private var largestFilesScope: LargestFilesScope = .currentFolder
 
     init(initialScanPath: String = "/") {
         _store = StateObject(wrappedValue: DiskUsageStore(initialScanPath: initialScanPath))
@@ -33,12 +34,13 @@ struct ContentView: View {
         .onReceive(store.$root.compactMap { $0 }) { root in
             reconcileNavigation(with: root)
         }
+        .onChange(of: store.sourceScanGeneration) {
+            focusPath = nil
+            selectedNode = nil
+            pendingTrash = nil
+        }
         .onChange(of: store.scanning) { _, scanning in
-            if scanning {
-                focusPath = nil
-                selectedNode = nil
-                pendingTrash = nil
-            } else if let root = store.root {
+            if !scanning, let root = store.root {
                 reconcileNavigation(with: root)
             }
         }
@@ -86,6 +88,8 @@ struct ContentView: View {
 
                 LargestFilesView(
                     store: store,
+                    focusPath: focusPath,
+                    scope: $largestFilesScope,
                     selectedNode: $selectedNode,
                     pendingTrash: $pendingTrash
                 )
@@ -113,10 +117,12 @@ struct ContentView: View {
         }
 
         if TreeOperations.node(in: root, atPath: focusPath) == nil {
-            if !store.scanning {
-                self.focusPath = root.path
-                selectedNode = nil
-            }
+            let resolvedPath = TreeOperations.buildZoomPath(
+                root: root,
+                targetPath: focusPath
+            ).last?.path ?? root.path
+            self.focusPath = resolvedPath
+            selectedNode = nil
             return
         }
 

@@ -11,14 +11,20 @@ final class DiskScanner {
     private let childLimitDepth = 2
     private let maxChildren = 30
     private let maxShallowChildren = 500
-    private let maxConcurrentChildScans = 8
-    private let maxConcurrentDirectoryReads = 8
+    private let maxConcurrentChildScans: Int
+    private let maxConcurrentDirectoryReads: Int
     private let fileSyncBatchSize = 128
     private let accumulatorSlack = 32
     private let snapshotInterval: TimeInterval
 
-    init(snapshotInterval: TimeInterval = 0.9) {
+    init(
+        snapshotInterval: TimeInterval = 0.9,
+        maxConcurrentChildScans: Int = 8,
+        maxConcurrentDirectoryReads: Int = 8
+    ) {
         self.snapshotInterval = snapshotInterval
+        self.maxConcurrentChildScans = max(1, maxConcurrentChildScans)
+        self.maxConcurrentDirectoryReads = max(1, maxConcurrentDirectoryReads)
     }
 
     func scanDirectoryStreaming(
@@ -40,6 +46,7 @@ final class DiskScanner {
             root,
             maxDepth: maxDepth ?? defaultMaxDepth,
             depth: 0,
+            largestFilesScope: nil,
             state: runState
         )
         try Task.checkCancellation()
@@ -52,7 +59,8 @@ final class DiskScanner {
         return DiskScanResult(
             root: final.root,
             progress: final.progress,
-            largestFiles: final.largestFiles
+            largestFiles: final.largestFiles,
+            largestFilesByFolder: final.largestFilesByFolder
         )
     }
 
@@ -75,18 +83,25 @@ final class DiskScanner {
         _ node: MutableDiskNode,
         maxDepth: Int,
         depth: Int,
+        largestFilesScope: MutableDiskNode?,
         state: ScanRunState
     ) async throws {
         try Task.checkCancellation()
 
         if depth >= maxDepth {
+            state.update { progress in
+                node.truncated = true
+                progress.currentPath = node.path
+            }
+            await state.emit()
+
             let size = try await nativeDirectorySize(
                 path: node.path,
                 updating: node,
+                largestFilesScope: largestFilesScope,
                 state: state
             )
             state.update { _ in
-                node.truncated = true
                 node.size = size
             }
             await state.emit()
@@ -119,7 +134,11 @@ final class DiskScanner {
         state.update { progress in
             progress.dirsFound += directories.count
         }
-        state.record(files: files, currentPath: node.path)
+        state.record(
+            files: files,
+            currentPath: node.path,
+            largestFilesScope: largestFilesScope
+        )
 
         var children = ChildAccumulator(
             parentPath: node.path,
@@ -149,6 +168,7 @@ final class DiskScanner {
                             child,
                             maxDepth: maxDepth,
                             depth: depth + 1,
+                            largestFilesScope: depth == 0 ? child : largestFilesScope,
                             state: state
                         )
                         return .completed(child)
@@ -259,8 +279,11 @@ final class DiskScanner {
             guard let values = try? entryURL.resourceValues(forKeys: keys) else {
                 return nil
             }
+            let entryPath = (path as NSString).appendingPathComponent(
+                entryURL.lastPathComponent
+            )
             guard Self.shouldScanURL(
-                path: entryURL.standardizedFileURL.path,
+                path: entryPath,
                 isSymbolicLink: values.isSymbolicLink,
                 isVolume: values.isVolume,
                 isScanRoot: false
@@ -274,7 +297,7 @@ final class DiskScanner {
 
             return DirectoryEntry(
                 name: entryURL.lastPathComponent,
-                path: entryURL.path,
+                path: entryPath,
                 isDirectory: isDirectory,
                 isRegularFile: isRegularFile,
                 fileSize: Int64(
@@ -310,6 +333,7 @@ final class DiskScanner {
     private func nativeDirectorySize(
         path: String,
         updating node: MutableDiskNode,
+        largestFilesScope: MutableDiskNode?,
         state: ScanRunState
     ) async throws -> Int64 {
         var totalSize: Int64 = 0
@@ -347,7 +371,11 @@ final class DiskScanner {
                 progress.dirsFound += directories.count
                 progress.dirsCompleted += 1
             }
-            state.record(files: files, currentPath: currentPath)
+            state.record(
+                files: files,
+                currentPath: currentPath,
+                largestFilesScope: largestFilesScope
+            )
             await state.emit()
         }
 
@@ -416,7 +444,11 @@ private final class ScanRunState {
         body(&progress)
     }
 
-    func record(files: [DirectoryEntry], currentPath: String) {
+    func record(
+        files: [DirectoryEntry],
+        currentPath: String,
+        largestFilesScope: MutableDiskNode?
+    ) {
         guard !files.isEmpty else { return }
 
         lock.lock()
@@ -426,6 +458,7 @@ private final class ScanRunState {
         progress.bytesFound += files.reduce(Int64(0)) { $0 + $1.fileSize }
         progress.currentPath = currentPath
         largestFiles.add(files)
+        largestFilesScope?.largestFiles.add(files)
     }
 
     func currentSnapshot() -> ScanSnapshot {
@@ -434,7 +467,8 @@ private final class ScanRunState {
         return ScanSnapshot(
             root: root.snapshot(),
             progress: progress,
-            largestFiles: largestFiles.snapshot
+            largestFiles: largestFiles.snapshot,
+            largestFilesByFolder: largestFilesByFolderSnapshot()
         )
     }
 
@@ -480,8 +514,19 @@ private final class ScanRunState {
         return ScanSnapshot(
             root: root.snapshot(),
             progress: progress,
-            largestFiles: largestFiles.snapshot
+            largestFiles: largestFiles.snapshot,
+            largestFilesByFolder: largestFilesByFolderSnapshot()
         )
+    }
+
+    private func largestFilesByFolderSnapshot() -> [String: [DiskNode]] {
+        var result = [root.path: largestFiles.snapshot]
+
+        for child in root.children ?? [] where child.kind == .directory {
+            result[child.path] = child.largestFiles.snapshot
+        }
+
+        return result
     }
 }
 
@@ -578,6 +623,7 @@ private final class MutableDiskNode {
     var fileExtension: String?
     var children: [MutableDiskNode]?
     var truncated: Bool
+    var largestFiles = LargestFileAccumulator(limit: 100)
 
     init(
         name: String,

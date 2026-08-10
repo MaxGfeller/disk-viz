@@ -159,6 +159,73 @@ final class DiskScannerTests: XCTestCase {
         )
     }
 
+    func testFolderLargestFilesRemainExactWhenExcludedFromGlobalTopHundred() async throws {
+        let fileManager = FileManager.default
+        let rootURL = fileManager.temporaryDirectory
+            .appendingPathComponent("DiskVizScanner-\(UUID().uuidString)", isDirectory: true)
+        let focusURL = rootURL.appendingPathComponent("Focus", isDirectory: true)
+        let siblingURL = rootURL.appendingPathComponent("Sibling", isDirectory: true)
+        let localFileURL = focusURL.appendingPathComponent("local.bin")
+
+        try fileManager.createDirectory(at: focusURL, withIntermediateDirectories: true)
+        try fileManager.createDirectory(at: siblingURL, withIntermediateDirectories: true)
+        try Data(repeating: 1, count: 4 * 1024).write(to: localFileURL)
+        for index in 0..<101 {
+            try Data(repeating: UInt8(index % 251), count: 64 * 1024).write(
+                to: siblingURL.appendingPathComponent("larger-\(index).bin")
+            )
+        }
+        defer {
+            try? fileManager.removeItem(at: rootURL)
+        }
+
+        let scanner = DiskScanner(snapshotInterval: 0)
+        let result = try await scanner.scanDirectoryStreaming(path: rootURL.path) { _ in }
+        let indexedFocusPath = try XCTUnwrap(
+            result.root.children?.first(where: { $0.name == "Focus" })?.path
+        )
+        let scopedFiles = try XCTUnwrap(result.largestFilesByFolder[indexedFocusPath])
+
+        XCTAssertFalse(result.largestFiles.contains { $0.name == "local.bin" })
+        XCTAssertEqual(scopedFiles.map(\.name), ["local.bin"])
+        XCTAssertEqual(result.largestFilesByFolder[result.root.path], result.largestFiles)
+    }
+
+    func testDeepTruncatedFilesAreAttributedToRetainedParentFolder() async throws {
+        let fileManager = FileManager.default
+        let rootURL = fileManager.temporaryDirectory
+            .appendingPathComponent("DiskVizScanner-\(UUID().uuidString)", isDirectory: true)
+        let focusURL = rootURL.appendingPathComponent("Focus", isDirectory: true)
+        let truncatedURL = focusURL.appendingPathComponent("Truncated", isDirectory: true)
+        let deepURL = truncatedURL
+            .appendingPathComponent("Deeper", isDirectory: true)
+            .appendingPathComponent("Deepest", isDirectory: true)
+        let deepFileURL = deepURL.appendingPathComponent("deep-large.dat")
+
+        try fileManager.createDirectory(at: deepURL, withIntermediateDirectories: true)
+        try Data(repeating: 7, count: 128 * 1024).write(to: deepFileURL)
+        defer {
+            try? fileManager.removeItem(at: rootURL)
+        }
+
+        let scanner = DiskScanner(snapshotInterval: 0)
+        let result = try await scanner.scanDirectoryStreaming(path: rootURL.path) { _ in }
+        let focus = try XCTUnwrap(result.root.children?.first(where: { $0.name == "Focus" }))
+        let truncated = try XCTUnwrap(focus.children?.first(where: { $0.name == "Truncated" }))
+        let scopedFiles = try XCTUnwrap(result.largestFilesByFolder[focus.path])
+
+        XCTAssertTrue(truncated.truncated)
+        XCTAssertNil(truncated.children)
+        XCTAssertEqual(scopedFiles.first?.name, "deep-large.dat")
+        XCTAssertEqual(
+            scopedFiles.first.map {
+                URL(fileURLWithPath: $0.path).resolvingSymlinksInPath().path
+            },
+            deepFileURL.resolvingSymlinksInPath().path
+        )
+        XCTAssertNil(result.largestFilesByFolder[truncated.path])
+    }
+
     func testDefaultScanBoundsRecursiveTreeWhileIndexingDeeperFiles() async throws {
         let fileManager = FileManager.default
         let rootURL = fileManager.temporaryDirectory
@@ -195,6 +262,41 @@ final class DiskScannerTests: XCTestCase {
         XCTAssertEqual(result.progress.dirsCompleted, 5)
         XCTAssertEqual(result.progress.filesFound, 1)
         XCTAssertGreaterThanOrEqual(result.progress.bytesFound, 128 * 1024)
+    }
+
+    func testTruncatedFolderBecomesOpenableBeforeItsTailTraversalCompletes() async throws {
+        let fileManager = FileManager.default
+        let rootURL = fileManager.temporaryDirectory
+            .appendingPathComponent("DiskVizScanner-\(UUID().uuidString)", isDirectory: true)
+        let level2URL = rootURL
+            .appendingPathComponent("Users", isDirectory: true)
+            .appendingPathComponent("mg", isDirectory: true)
+        let deepURL = level2URL
+            .appendingPathComponent("Library", isDirectory: true)
+            .appendingPathComponent("Caches", isDirectory: true)
+
+        try fileManager.createDirectory(at: deepURL, withIntermediateDirectories: true)
+        try Data(repeating: 5, count: 32 * 1024)
+            .write(to: deepURL.appendingPathComponent("payload.bin"))
+        defer {
+            try? fileManager.removeItem(at: rootURL)
+        }
+
+        let scanner = DiskScanner(snapshotInterval: 0)
+        var snapshots: [ScanSnapshot] = []
+        _ = try await scanner.scanDirectoryStreaming(path: rootURL.path) { snapshot in
+            snapshots.append(snapshot)
+        }
+
+        XCTAssertTrue(
+            snapshots.contains { snapshot in
+                guard snapshot.progress.dirsCompleted < snapshot.progress.dirsFound else {
+                    return false
+                }
+                return TreeOperations.node(in: snapshot.root, atPath: level2URL.path)?.truncated == true
+            },
+            "A depth-limited folder should advertise that it can be opened while the source scan is still active."
+        )
     }
 
     func testNestedVolumePolicySkipsMountedChildrenButAllowsSelectedRoot() {

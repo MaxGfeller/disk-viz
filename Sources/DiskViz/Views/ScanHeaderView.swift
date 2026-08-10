@@ -53,6 +53,8 @@ struct ScanHeaderView: View {
 
             ScanStatusRow(
                 scanning: store.scanning,
+                sourceScanning: store.sourceScanning,
+                expandingPath: store.expandingPath,
                 scanStopped: store.scanStopped,
                 progress: store.progress,
                 errorMessage: store.errorMessage,
@@ -259,6 +261,8 @@ private struct DiskVolumeSummaryView: View {
 
 private struct ScanStatusRow: View {
     var scanning: Bool
+    var sourceScanning: Bool
+    var expandingPath: String?
     var scanStopped: Bool
     var progress: ScanProgress?
     var errorMessage: String?
@@ -315,7 +319,10 @@ private struct ScanStatusRow: View {
 
     @ViewBuilder
     private var statusText: some View {
-        if scanning {
+        if let expandingPath {
+            Text(expansionStatus(for: expandingPath))
+                .foregroundStyle(.primary)
+        } else if scanning {
             Text(progress == nil ? "Preparing scan…" : "Scanning…")
                 .foregroundStyle(.primary)
         } else if scanStopped {
@@ -335,6 +342,9 @@ private struct ScanStatusRow: View {
     }
 
     private var currentPathHelp: String {
+        if let expandingPath {
+            return "Indexing \(expandingPath) in more detail"
+        }
         guard scanning, let currentPath = progress?.currentPath, !currentPath.isEmpty else {
             return ""
         }
@@ -343,6 +353,14 @@ private struct ScanStatusRow: View {
 
     private func inaccessibleLabel(_ count: Int) -> String {
         "\(count.formatted()) \(count == 1 ? "folder" : "folders") inaccessible"
+    }
+
+    private func expansionStatus(for path: String) -> String {
+        let name = URL(fileURLWithPath: path).lastPathComponent
+        let folderName = name.isEmpty ? path : name
+        return sourceScanning
+            ? "Scanning disk · opening \(folderName)…"
+            : "Opening \(folderName)…"
     }
 }
 

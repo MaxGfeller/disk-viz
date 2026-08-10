@@ -56,10 +56,12 @@ struct ScanSnapshot: Equatable, Sendable {
     var root: DiskNode
     var progress: ScanProgress
     var largestFiles: [DiskNode]
+    var largestFilesByFolder: [String: [DiskNode]]
 }
 
 struct DiskScanResult: Equatable, Sendable {
     var root: DiskNode
     var progress: ScanProgress
     var largestFiles: [DiskNode]
+    var largestFilesByFolder: [String: [DiskNode]]
 }
