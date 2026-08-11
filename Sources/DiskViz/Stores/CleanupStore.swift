@@ -63,6 +63,7 @@ final class CleanupStore: ObservableObject {
             async let filesystemSuggestions = analyzer.analyze()
             async let dockerEstimate = try? dockerInspector.inspect()
             async let simulatorEstimate = try? simulatorInspector.inspect()
+            async let outdatedRuntimeEstimate = try? simulatorInspector.inspectOutdatedRuntimes()
 
             var combined: [CleanupSuggestion] = []
             if let docker = await dockerEstimate {
@@ -74,6 +75,13 @@ final class CleanupStore: ObservableObject {
             if let simulators = await simulatorEstimate,
                simulators.unavailableDeviceCount > 0 {
                 combined.append(Self.simulatorSuggestion(simulators))
+            }
+            guard self.activeRefreshID == refreshID else { return }
+            self.suggestions = combined.sorted(by: Self.suggestionOrder)
+
+            if let runtimes = await outdatedRuntimeEstimate,
+               runtimes.runtimeCount > 0 {
+                combined.append(Self.outdatedRuntimeSuggestion(runtimes))
             }
             guard self.activeRefreshID == refreshID else { return }
             self.suggestions = combined.sorted(by: Self.suggestionOrder)
@@ -155,6 +163,21 @@ final class CleanupStore: ObservableObject {
         )
     }
 
+    func requestDeleteOutdatedSimulatorRuntimes(from suggestion: CleanupSuggestion) {
+        guard hasAnalyzed,
+              !executing,
+              !analyzing,
+              suggestions.contains(suggestion)
+        else { return }
+        pendingAction = CleanupPendingAction(
+            kind: .deleteOutdatedSimulatorRuntimes,
+            title: "Permanently remove outdated simulator runtimes?",
+            message: "This runs `xcrun simctl runtime delete --outdated`. Xcode decides which runtime disk images are superseded and removes them from macOS-managed storage (about \(ByteFormatter.string(from: suggestion.estimatedBytes))). Projects are untouched, and removed runtimes can be downloaded again in Xcode. This cannot be undone.",
+            confirmTitle: "Remove Runtimes",
+            estimatedBytes: suggestion.estimatedBytes
+        )
+    }
+
     func cancelPendingAction() {
         pendingAction = nil
     }
@@ -183,6 +206,9 @@ final class CleanupStore: ObservableObject {
                 case .deleteUnavailableSimulators:
                     try await executor.deleteUnavailableSimulators()
                     notice = "Unavailable simulator cleanup finished."
+                case .deleteOutdatedSimulatorRuntimes:
+                    try await executor.deleteOutdatedSimulatorRuntimes()
+                    notice = "Outdated simulator runtime cleanup finished."
                 }
 
                 guard let self else { return }
@@ -245,6 +271,19 @@ final class CleanupStore: ObservableObject {
             detail: "\(estimate.unavailableDeviceCount.formatted()) devices refer to runtimes that are no longer installed. Removal is permanent.",
             estimatedBytes: estimate.allocatedBytes,
             totalCandidateCount: estimate.unavailableDeviceCount,
+            isPartial: estimate.isSizePartial
+        )
+    }
+
+    private static func outdatedRuntimeSuggestion(
+        _ estimate: OutdatedSimulatorRuntimeEstimate
+    ) -> CleanupSuggestion {
+        CleanupSuggestion(
+            category: .outdatedSimulatorRuntimes,
+            title: "Outdated simulator runtimes",
+            detail: "\(estimate.runtimeCount.formatted()) runtime\(estimate.runtimeCount == 1 ? " is" : "s are") superseded according to Xcode. These live in macOS-managed AssetsV2 storage; never delete them manually.",
+            estimatedBytes: estimate.allocatedBytes,
+            totalCandidateCount: estimate.runtimeCount,
             isPartial: estimate.isSizePartial
         )
     }

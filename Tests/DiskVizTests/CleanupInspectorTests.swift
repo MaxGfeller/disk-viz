@@ -70,6 +70,46 @@ final class CleanupInspectorTests: XCTestCase {
         let calls = await runner.recordedArguments()
         XCTAssertTrue(calls.contains(["simctl", "delete", "unavailable"]))
     }
+
+    func testSimulatorInspectorMeasuresAndDeletesOnlyOutdatedRuntimes() async throws {
+        let firstID = "25D603B2-0058-46BF-AE1A-783A787D0E83"
+        let secondID = "A69B5ED1-B776-4BCC-A37D-4797DEE20071"
+        let dryRun = """
+        Would delete P: \(firstID) xrOS (26.2 - 23N301) (Ready)
+        Would delete P: \(secondID) iOS (26.2 - 23C54) (Ready)
+        """
+        let runtimeList = """
+        {
+          "\(firstID)":{"sizeBytes":7169832779},
+          "\(secondID)":{"sizeBytes":8381044573}
+        }
+        """
+        let runner = RecordingCommandRunner { arguments in
+            switch arguments {
+            case ["simctl", "runtime", "delete", "--outdated", "--dry-run"]:
+                return commandResult(arguments: arguments, stdout: dryRun)
+            case ["simctl", "runtime", "list", "-j"]:
+                return commandResult(arguments: arguments, stdout: runtimeList)
+            default:
+                return commandResult(arguments: arguments)
+            }
+        }
+        let inspector = SimulatorInspector(
+            runner: runner,
+            xcrunPath: "/usr/bin/true",
+            duPath: "/usr/bin/true"
+        )
+
+        let inspectedRuntimes = try await inspector.inspectOutdatedRuntimes()
+        let estimate = try XCTUnwrap(inspectedRuntimes)
+        XCTAssertEqual(estimate.runtimeCount, 2)
+        XCTAssertEqual(estimate.allocatedBytes, 7_169_832_779 + 8_381_044_573)
+        XCTAssertFalse(estimate.isSizePartial)
+
+        try await inspector.executeDeleteOutdatedRuntimes()
+        let calls = await runner.recordedArguments()
+        XCTAssertTrue(calls.contains(["simctl", "runtime", "delete", "--outdated"]))
+    }
 }
 
 private actor RecordingCommandRunner: CommandRunning {

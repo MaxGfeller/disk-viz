@@ -9,6 +9,7 @@ protocol CleanupActionExecuting: Sendable {
     func moveToTrash(candidates: [CleanupCandidate]) async throws -> CleanupExecutionResult
     func pruneDocker() async throws
     func deleteUnavailableSimulators() async throws
+    func deleteOutdatedSimulatorRuntimes() async throws
 }
 
 struct CleanupActionExecutor: CleanupActionExecuting {
@@ -56,6 +57,10 @@ struct CleanupActionExecutor: CleanupActionExecuting {
 
     func deleteUnavailableSimulators() async throws {
         try await simulatorInspector.executeDeleteUnavailable()
+    }
+
+    func deleteOutdatedSimulatorRuntimes() async throws {
+        try await simulatorInspector.executeDeleteOutdatedRuntimes()
     }
 
     static func validatedTrashPath(_ candidate: CleanupCandidate) throws -> String {

@@ -6,9 +6,17 @@ struct SimulatorUsageEstimate: Equatable, Sendable {
     var isSizePartial = false
 }
 
+struct OutdatedSimulatorRuntimeEstimate: Equatable, Sendable {
+    var runtimeCount: Int
+    var allocatedBytes: Int64
+    var isSizePartial = false
+}
+
 protocol SimulatorInspecting: Sendable {
     func inspect() async throws -> SimulatorUsageEstimate?
+    func inspectOutdatedRuntimes() async throws -> OutdatedSimulatorRuntimeEstimate?
     func executeDeleteUnavailable() async throws
+    func executeDeleteOutdatedRuntimes() async throws
 }
 
 struct SimulatorInspector: SimulatorInspecting {
@@ -102,6 +110,76 @@ struct SimulatorInspector: SimulatorInspecting {
         }
     }
 
+    func inspectOutdatedRuntimes() async throws -> OutdatedSimulatorRuntimeEstimate? {
+        guard FileManager.default.isExecutableFile(atPath: xcrunPath) else { return nil }
+
+        let dryRun = try await runner.run(
+            executable: xcrunPath,
+            arguments: ["simctl", "runtime", "delete", "--outdated", "--dry-run"],
+            timeout: 30,
+            outputLimit: 2 * 1024 * 1024
+        )
+        guard !dryRun.timedOut, dryRun.exitCode == 0 else { return nil }
+
+        let identifiers = Self.parseOutdatedRuntimeIdentifiers(
+            dryRun.stdoutString + "\n" + dryRun.stderrString
+        )
+        guard !identifiers.isEmpty else {
+            return OutdatedSimulatorRuntimeEstimate(runtimeCount: 0, allocatedBytes: 0)
+        }
+
+        let listResult = try await runner.run(
+            executable: xcrunPath,
+            arguments: ["simctl", "runtime", "list", "-j"],
+            timeout: 30,
+            outputLimit: 8 * 1024 * 1024
+        )
+        guard !listResult.timedOut,
+              listResult.exitCode == 0,
+              let runtimes = try? JSONDecoder().decode(
+                [String: SimulatorRuntimeJSON].self,
+                from: listResult.stdout
+              )
+        else {
+            return OutdatedSimulatorRuntimeEstimate(
+                runtimeCount: identifiers.count,
+                allocatedBytes: 0,
+                isSizePartial: true
+            )
+        }
+
+        var measuredCount = 0
+        let allocatedBytes = identifiers.reduce(Int64(0)) { total, identifier in
+            guard let size = runtimes[identifier]?.sizeBytes else { return total }
+            measuredCount += 1
+            return total + max(0, size)
+        }
+        return OutdatedSimulatorRuntimeEstimate(
+            runtimeCount: identifiers.count,
+            allocatedBytes: allocatedBytes,
+            isSizePartial: measuredCount != identifiers.count
+        )
+    }
+
+    func executeDeleteOutdatedRuntimes() async throws {
+        guard FileManager.default.isExecutableFile(atPath: xcrunPath) else {
+            throw SimulatorInspectorError.xcodeToolsUnavailable
+        }
+
+        let result = try await runner.run(
+            executable: xcrunPath,
+            arguments: ["simctl", "runtime", "delete", "--outdated"],
+            timeout: 15 * 60,
+            outputLimit: 8 * 1024 * 1024
+        )
+        guard !result.timedOut else {
+            throw SimulatorInspectorError.timedOut
+        }
+        guard result.exitCode == 0 else {
+            throw SimulatorInspectorError.commandFailed(result.stderrString)
+        }
+    }
+
     static func parseUnavailableDevices(_ data: Data) -> [SimulatorDevice] {
         guard let response = try? JSONDecoder().decode(SimulatorListResponse.self, from: data) else {
             return []
@@ -128,6 +206,16 @@ struct SimulatorInspector: SimulatorInspecting {
             }
             return partial + max(0, value)
         }
+    }
+
+    static func parseOutdatedRuntimeIdentifiers(_ output: String) -> Set<String> {
+        Set(output.split(whereSeparator: \Character.isNewline).compactMap { line in
+            guard line.hasPrefix("Would delete") else { return nil }
+            return line.split(whereSeparator: \Character.isWhitespace)
+                .map(String.init)
+                .first { UUID(uuidString: $0) != nil }
+                .map { $0.uppercased() }
+        })
     }
 }
 
@@ -161,6 +249,10 @@ private struct SimulatorDeviceJSON: Decodable {
     var name: String
     var udid: String
     var isAvailable: Bool?
+}
+
+private struct SimulatorRuntimeJSON: Decodable {
+    var sizeBytes: Int64?
 }
 
 private extension SimulatorDevice {

@@ -115,6 +115,9 @@ struct CleanupDashboardView: View {
                             onRemoveSimulators: {
                                 store.requestDeleteUnavailableSimulators(from: suggestion)
                             },
+                            onRemoveOutdatedRuntimes: {
+                                store.requestDeleteOutdatedSimulatorRuntimes(from: suggestion)
+                            },
                             onOpenTrash: store.openTrash
                         )
                     }
@@ -204,6 +207,7 @@ private struct CleanupOpportunityCard: View {
     var onDockerPrune: () -> Void
     var onOpenDocker: () -> Void
     var onRemoveSimulators: () -> Void
+    var onRemoveOutdatedRuntimes: () -> Void
     var onOpenTrash: () -> Void
 
     var body: some View {
@@ -279,6 +283,14 @@ private struct CleanupOpportunityCard: View {
             HStack {
                 Spacer()
                 Button("Remove…", action: onRemoveSimulators)
+                    .buttonStyle(.borderedProminent)
+                    .tint(.orange)
+                    .disabled(executing)
+            }
+        case .outdatedSimulatorRuntimes:
+            HStack {
+                Spacer()
+                Button("Remove…", action: onRemoveOutdatedRuntimes)
                     .buttonStyle(.borderedProminent)
                     .tint(.orange)
                     .disabled(executing)
@@ -553,6 +565,7 @@ private extension CleanupCategory {
         case .xcodeDerivedData: return "wrench.and.screwdriver"
         case .docker: return "shippingbox"
         case .unavailableSimulators: return "iphone.slash"
+        case .outdatedSimulatorRuntimes: return "shippingbox.and.arrow.backward"
         case .trash: return "trash"
         }
     }
@@ -565,6 +578,7 @@ private extension CleanupCategory {
         case .xcodeDerivedData: return .indigo
         case .docker: return .cyan
         case .unavailableSimulators: return .pink
+        case .outdatedSimulatorRuntimes: return .mint
         case .trash: return .secondary
         }
     }

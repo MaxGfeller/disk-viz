@@ -7,6 +7,7 @@ enum CleanupCategory: String, CaseIterable, Hashable, Sendable {
     case xcodeDerivedData
     case docker
     case unavailableSimulators
+    case outdatedSimulatorRuntimes
     case trash
 }
 
@@ -96,6 +97,7 @@ enum CleanupPendingActionKind: Hashable, Sendable {
     case moveToTrash(candidates: [CleanupCandidate])
     case pruneDocker
     case deleteUnavailableSimulators
+    case deleteOutdatedSimulatorRuntimes
 }
 
 struct CleanupPendingAction: Identifiable, Hashable, Sendable {

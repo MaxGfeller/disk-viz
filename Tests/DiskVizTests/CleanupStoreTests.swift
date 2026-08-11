@@ -156,6 +156,41 @@ final class CleanupStoreTests: XCTestCase {
         XCTAssertTrue(store.suggestions.isEmpty)
         XCTAssertNil(store.pendingAction)
     }
+
+    @MainActor
+    func testOutdatedRuntimeQuickActionRequiresConfirmationAndExecutes() async throws {
+        let executor = RecordingCleanupExecutor()
+        let store = CleanupStore(
+            analyzer: FixedCleanupAnalyzer(),
+            dockerInspector: EmptyDockerInspector(),
+            simulatorInspector: OutdatedSimulatorInspector(),
+            executor: executor
+        )
+
+        store.refresh()
+        for _ in 0..<100 {
+            if !store.analyzing { break }
+            try await Task.sleep(nanoseconds: 5_000_000)
+        }
+
+        let suggestion = try XCTUnwrap(
+            store.suggestions.first { $0.category == .outdatedSimulatorRuntimes }
+        )
+        XCTAssertEqual(suggestion.estimatedBytes, 15_000)
+
+        store.requestDeleteOutdatedSimulatorRuntimes(from: suggestion)
+        XCTAssertNotNil(store.pendingAction)
+        let callsBeforeConfirmation = await executor.recordedOutdatedRuntimeDeleteCount()
+        XCTAssertEqual(callsBeforeConfirmation, 0)
+
+        store.confirmPendingAction()
+        for _ in 0..<50 {
+            if await executor.recordedOutdatedRuntimeDeleteCount() > 0 { break }
+            try await Task.sleep(nanoseconds: 5_000_000)
+        }
+        let callsAfterConfirmation = await executor.recordedOutdatedRuntimeDeleteCount()
+        XCTAssertEqual(callsAfterConfirmation, 1)
+    }
 }
 
 private struct FixedCleanupAnalyzer: CleanupAnalyzing {
@@ -196,11 +231,26 @@ private struct EmptyDockerInspector: DockerInspecting {
 
 private struct EmptySimulatorInspector: SimulatorInspecting {
     func inspect() async throws -> SimulatorUsageEstimate? { nil }
+    func inspectOutdatedRuntimes() async throws -> OutdatedSimulatorRuntimeEstimate? { nil }
     func executeDeleteUnavailable() async throws {}
+    func executeDeleteOutdatedRuntimes() async throws {}
+}
+
+private struct OutdatedSimulatorInspector: SimulatorInspecting {
+    func inspect() async throws -> SimulatorUsageEstimate? { nil }
+    func inspectOutdatedRuntimes() async throws -> OutdatedSimulatorRuntimeEstimate? {
+        OutdatedSimulatorRuntimeEstimate(
+            runtimeCount: 2,
+            allocatedBytes: 15_000
+        )
+    }
+    func executeDeleteUnavailable() async throws {}
+    func executeDeleteOutdatedRuntimes() async throws {}
 }
 
 private actor RecordingCleanupExecutor: CleanupActionExecuting {
     private var trashCalls: [[String]] = []
+    private var outdatedRuntimeDeleteCount = 0
 
     func moveToTrash(candidates: [CleanupCandidate]) async throws -> CleanupExecutionResult {
         let paths = candidates.map(\.path)
@@ -210,8 +260,15 @@ private actor RecordingCleanupExecutor: CleanupActionExecuting {
 
     func pruneDocker() async throws {}
     func deleteUnavailableSimulators() async throws {}
+    func deleteOutdatedSimulatorRuntimes() async throws {
+        outdatedRuntimeDeleteCount += 1
+    }
 
     func recordedTrashCalls() -> [[String]] {
         trashCalls
+    }
+
+    func recordedOutdatedRuntimeDeleteCount() -> Int {
+        outdatedRuntimeDeleteCount
     }
 }
