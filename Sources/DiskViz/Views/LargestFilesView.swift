@@ -293,6 +293,10 @@ private struct LargestFileRow: View {
         URL(fileURLWithPath: file.path).deletingLastPathComponent().path
     }
 
+    private var isManagedAsset: Bool {
+        FileActionPolicy.manualDeletionRestriction(for: file.path) != nil
+    }
+
     var body: some View {
         HStack(spacing: 8) {
             Button(action: onSelect) {
@@ -311,6 +315,12 @@ private struct LargestFileRow: View {
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
                             .truncationMode(.middle)
+
+                        if isManagedAsset {
+                            Label("Managed by macOS", systemImage: "checkmark.shield")
+                                .font(.caption2)
+                                .foregroundStyle(.tertiary)
+                        }
                     }
 
                     Spacer(minLength: 6)
@@ -320,7 +330,11 @@ private struct LargestFileRow: View {
                         .monospacedDigit()
                         .foregroundStyle(.secondary)
                 }
-                .frame(maxWidth: .infinity, minHeight: 50, alignment: .leading)
+                .frame(
+                    maxWidth: .infinity,
+                    minHeight: isManagedAsset ? 62 : 50,
+                    alignment: .leading
+                )
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
@@ -345,7 +359,7 @@ private struct LargestFileRow: View {
             }
         }
         .padding(.horizontal, 10)
-        .frame(minHeight: 50)
+        .frame(minHeight: isManagedAsset ? 62 : 50)
         .background(
             RoundedRectangle(cornerRadius: 6, style: .continuous)
                 .fill(

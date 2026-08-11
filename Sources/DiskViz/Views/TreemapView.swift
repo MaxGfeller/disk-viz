@@ -90,6 +90,13 @@ struct TreemapView: View {
             Spacer(minLength: 12)
 
             if let currentNode {
+                if let restriction = FileActionPolicy.manualDeletionRestriction(
+                    for: currentNode.path
+                ) {
+                    Label("Managed by macOS", systemImage: "checkmark.shield")
+                        .foregroundStyle(.secondary)
+                        .help(restriction)
+                }
                 Text("\(currentNode.children?.count ?? 0) items")
                     .foregroundStyle(.tertiary)
                     .accessibilityLabel("Current folder")
@@ -178,6 +185,10 @@ private struct TreemapTile: View {
         return FileCategoryColor.color(for: layoutNode.node, sizeRatio: sizeRatio)
     }
 
+    private var isManagedAsset: Bool {
+        FileActionPolicy.manualDeletionRestriction(for: layoutNode.node.path) != nil
+    }
+
     var body: some View {
         let rect = visualRect
 
@@ -250,7 +261,11 @@ private struct TreemapTile: View {
         if rect.width > 54 && rect.height > 24 {
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 5) {
-                    Image(systemName: layoutNode.node.isDirectory ? "folder.fill" : "doc.fill")
+                    Image(
+                        systemName: isManagedAsset
+                            ? "checkmark.shield.fill"
+                            : (layoutNode.node.isDirectory ? "folder.fill" : "doc.fill")
+                    )
                         .font(.system(size: 10, weight: .semibold))
 
                     Text(layoutNode.node.name)
@@ -303,6 +318,13 @@ private struct SelectedNodeBar: View {
             Text(ByteFormatter.string(from: node.size))
                 .font(.callout.weight(.medium))
                 .monospacedDigit()
+
+            if let restriction = FileActionPolicy.manualDeletionRestriction(for: node.path) {
+                Label("Managed", systemImage: "checkmark.shield")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .help(restriction)
+            }
 
             if node.isDirectory && node.hasChildren {
                 Button("Open") {

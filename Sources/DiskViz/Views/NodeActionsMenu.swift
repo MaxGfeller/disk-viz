@@ -10,6 +10,10 @@ struct NodeActionsMenu: View {
         !isSyntheticDiskNode(node)
     }
 
+    private var manualDeletionRestriction: String? {
+        FileActionPolicy.manualDeletionRestriction(for: node.path)
+    }
+
     var body: some View {
         Text(node.name)
         Text(ByteFormatter.string(from: node.size))
@@ -28,10 +32,16 @@ struct NodeActionsMenu: View {
 
             Divider()
 
-            Button("Move to Trash…", role: .destructive) {
-                pendingTrash = node
+            if let manualDeletionRestriction {
+                Label("Managed by macOS", systemImage: "checkmark.shield")
+                Text(manualDeletionRestriction)
+                    .font(.caption)
+            } else {
+                Button("Move to Trash…", role: .destructive) {
+                    pendingTrash = node
+                }
+                .disabled(store.scanning)
             }
-            .disabled(store.scanning)
         }
     }
 }

@@ -404,6 +404,11 @@ final class DiskUsageStore: ObservableObject {
             return
         }
 
+        if let restriction = FileActionPolicy.manualDeletionRestriction(for: node.path) {
+            errorMessage = restriction
+            return
+        }
+
         do {
             try FileManager.default.trashItem(
                 at: URL(fileURLWithPath: node.path),
